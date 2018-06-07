@@ -1,6 +1,9 @@
 # qgis_scripts
 This is scripts for QGIS
 
+## CreatePoint
+create a simple point of lat,lon. it is temporary layer.
+
 ## RectangleArea
 create rectangle polygon by scale and paper size(cm).  
 if scale 25000, Height 20cm, Width 20cm, then 5km x 5km rectangle is created at center of map canvas.   
