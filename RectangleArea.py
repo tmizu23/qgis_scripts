@@ -1,7 +1,7 @@
 ##RetangleArea=name
 ##Scale=number 25000
-##Height=number 20
-##Width=number 20
+##Height=number 20.0
+##Width=number 20.0
 
 from qgis.core import QgsVectorLayer, QgsFeature, QgsPoint, QgsRectangle, QgsGeometry, QgsMapLayerRegistry
 from qgis.utils import iface
