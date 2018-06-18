@@ -1,6 +1,6 @@
 ##CreatePoint=name
-##Lat=number 35
-##Lon=number 135
+##Lat=number 35.0
+##Lon=number 135.0
 
 from qgis.core import QgsVectorLayer, QgsFeature, QgsPoint, QgsGeometry, QgsMapLayerRegistry
 
