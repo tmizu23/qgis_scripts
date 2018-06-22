@@ -15,7 +15,10 @@ def scalingPoint(cent,seg,scale):
 canvas=iface.mapCanvas()
 
 layer = iface.activeLayer()
-features = layer.getFeatures()
+features = layer.selectedFeatures()
+if len(features)==0:
+    features = layer.getFeatures()
+
 epsg = layer.crs().postgisSrid()
 if layer.wkbType()==2:
     geomtype="LineString"
