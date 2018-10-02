@@ -43,12 +43,27 @@ def set_text_position(text,layer,x,y):
     layer.startEditing()
     feature['x'] = round(x,4)
     feature['y'] = round(y,4)
-    #log("setx:{},sety:{}".format(x, y))
+
     layer.updateFeature(feature)
     layer.commitChanges()
+    #feature = getFeatureById(layer, text.featureId)
+    #log("setx:{},sety:{}".format(feature['x'], feature['y']))
+
+def set_text_position2(bbox,x,y):
+    bbox['xmin']=x
+    bbox['ymin']=y
+    bbox['xmax']=x+bbox['width']
+    bbox['ymax'] = y + bbox['height']
+    bbox['extents'] = np.array([bbox['xmin'],bbox['ymin'],bbox['xmax'],bbox['ymax']])
+    return bbox
 
 def get_bboxes(objs):
-    return [{'xmin':lrl.cornerPoints[0][0],'xmax':lrl.cornerPoints[2][0],'ymin':lrl.cornerPoints[0][1],'ymax':lrl.cornerPoints[2][1],'width':lrl.width,'height':lrl.height} for lrl in objs]
+    bboxes = [{'xmin':lrl.cornerPoints[0][0],'xmax':lrl.cornerPoints[2][0],'ymin':lrl.cornerPoints[0][1],'ymax':lrl.cornerPoints[2][1],
+               'width':lrl.width,'height':lrl.height,
+               'extents':np.array([lrl.cornerPoints[0][0],lrl.cornerPoints[0][1],lrl.cornerPoints[2][0],lrl.cornerPoints[2][1]])} for lrl in objs]
+    #for b in bboxes:
+    #    log("xmin:{},ymin:{},xmax:{},ymax:{}".format(b["xmin"], b["ymin"], b["xmax"], b["ymax"]))
+    return bboxes
 
 def get_midpoint(bbox):
     cx = (bbox["xmin"]+bbox["xmax"])/2
@@ -87,28 +102,40 @@ def overlap_bbox_and_point(bbox, xp, yp):
         dy = 0
     return dx, dy
 
+def intersection_size(bbox1, bbox2):
+    """
+    Return the intersection of the two bboxes or None
+    if they do not intersect.
+    """
+    x0 = np.maximum(bbox1['xmin'], bbox2['xmin'])
+    x1 = np.minimum(bbox1['xmax'], bbox2['xmax'])
+    y0 = np.maximum(bbox1['ymin'], bbox2['ymin'])
+    y1 = np.minimum(bbox1['ymax'], bbox2['ymax'])
+    return (x1-x0,y1-y0) if x0 <= x1 and y0 <= y1 else None
+
 def repel_text(texts,layer,move=False):
     bboxes = get_bboxes(texts)
-    xmins = np.array([bbox['xmin'] for bbox in bboxes])
-    xmaxs = np.array([bbox['xmax'] for bbox in bboxes])
-    ymaxs = np.array([bbox['ymax'] for bbox in bboxes])
-    ymins = np.array([bbox['ymin'] for bbox in bboxes])
-
+    xmins = [bbox['xmin'] for bbox in bboxes]
+    xmaxs = [bbox['xmax'] for bbox in bboxes]
+    ymaxs = [bbox['ymax'] for bbox in bboxes]
+    ymins = [bbox['ymin'] for bbox in bboxes]
+    log("xmins:{}".format(xmins))
     overlaps_x = np.zeros((len(bboxes), len(bboxes)))
     overlaps_y = np.zeros_like(overlaps_x)
     overlap_directions_x = np.zeros_like(overlaps_x)
     overlap_directions_y = np.zeros_like(overlaps_y)
 
     for i, bbox1 in enumerate(bboxes):
-        overlaps = get_points_inside_bbox(xmins*2+xmaxs*2, (ymins+ymaxs)*2,bbox1) % len(bboxes)
+        overlaps = get_points_inside_bbox(np.array(xmins*2+xmaxs*2), np.array((ymins+ymaxs)*2),bbox1) % len(bboxes)
         overlaps = np.unique(overlaps)
         #log("{}".format(overlaps))
         for j in overlaps:
             bbox2 = bboxes[j]
-            x, y = bbox1.intersection(bbox1, bbox2).size
+            x, y = intersection_size(bbox1, bbox2)
+            #log("ovx:{},ovy{}".format(x,y))
             overlaps_x[i, j] = x
             overlaps_y[i, j] = y
-            direction = np.sign(bbox1.extents - bbox2.extents)[:2]
+            direction = np.sign(bbox1['extents'] - bbox2['extents'])[:2]
             overlap_directions_x[i, j] = direction[0]
             overlap_directions_y[i, j] = direction[1]
 
@@ -131,7 +158,7 @@ def repel_text_from_points(x, y, texts, layer, move=False):
     move_y = np.zeros((len(bboxes), len(x)))
     for i, bbox in enumerate(bboxes):
         xy_in = get_points_inside_bbox(x, y, bbox)
-        #log("{},{},{}".format(x,y,bbox))
+        log("x:{},y:{},bbox:{},xy_in:{}".format(x,y,bbox,xy_in))
         for j in xy_in:
             xp, yp = x[j], y[j]
             dx, dy = overlap_bbox_and_point(bbox, xp, yp)
@@ -174,9 +201,21 @@ def repel_text_from_axes(texts, extent,layer):
 def move_texts(texts, layer,delta_x, delta_y):
     for text,dx, dy in zip(texts,delta_x, delta_y):
         x, y = get_text_position(text,layer)
+        log("textx:{},texty:{}".format(x,y))
         newx = x + dx
         newy = y + dy
         set_text_position(text, layer, newx, newy)
+
+def move_texts2(bboxes,delta_x, delta_y):
+    newbboxes=[]
+    for bbox,dx, dy in zip(bboxes,delta_x, delta_y):
+        x, y = bbox['xmin'],bbox['ymin']
+        log("textx:{},texty:{}".format(x,y))
+        newx = x + dx
+        newy = y + dy
+        newbbox=set_text_position2(bbox, newx, newy)
+        newbboxes.append(newbbox)
+    return newbboxes
 
 def adjust_text(lim=500,force_text=(0.1, 0.25), force_points=(0.2, 0.5),precision=0.01):
     canvas=iface.mapCanvas()
@@ -192,42 +231,49 @@ def adjust_text(lim=500,force_text=(0.1, 0.25), force_points=(0.2, 0.5),precisio
         orig_xy = [get_point_position(text,layer) for text in texts]
         orig_x = np.array([xy[0] for xy in orig_xy])
         orig_y = np.array([xy[1] for xy in orig_xy])
-        #log("len:{}".format(len(orig_xy)))
+        log("len:{}".format(len(orig_xy)))
         for text,x,y in zip(texts,orig_x,orig_y):
             set_text_position(text,layer,x,y)
         x,y = orig_x,orig_y
         force_text = float_to_tuple(force_text)
         force_points = float_to_tuple(force_points)
         bboxes = get_bboxes(texts)
-        for b in bboxes:
-            log("{},{},{},{}".format(b["xmin"],b["xmax"],b["ymin"],b["ymax"]))
         sum_width = np.sum(list(map(lambda bbox: bbox['width'], bboxes)))
         sum_height = np.sum(list(map(lambda bbox: bbox['height'], bboxes)))
         precision_x = precision * sum_width
         precision_y = precision * sum_height
-
+        #log("w:{},h:{},pw:{},ph:{}".format(sum_width,sum_height,precision_x,precision_y))
 
         #extent = canvas.extent()
         #repel_text_from_axes(texts,extent,layer)
 
         history = [(np.inf, np.inf)]*10
         for i in xrange(lim):
+            log("i:{}".format(i))
             d_x_text, d_y_text, q1 = repel_text(texts,layer)
-        #    d_x_text, d_y_text, q1 = [0] * len(texts), [0] * len(texts), (0, 0)
-            d_x_points, d_y_points, q2 = repel_text_from_points(x, y, texts,layer)
-            #log("{},{},{}".format(d_x_points, d_y_points, q2))
+            #d_x_text, d_y_text, q1 = [0] * len(texts), [0] * len(texts), (0, 0)
+            #d_x_points, d_y_points, q2 = repel_text_from_points(x, y, texts,layer)
+            d_x_points, d_y_points, q2 = [0] * len(texts), [0] * len(texts), (0, 0)
+            #log("d_x:{},d_y{},q2{}".format(d_x_points, d_y_points, q2))
+            log("d_x:{},d_y{},q2{}".format(d_x_text, d_y_text, q1))
 
             dx = (np.array(d_x_text) * force_text[0] +
                   np.array(d_x_points) * force_points[0])
             dy = (np.array(d_y_text) * force_text[1] +
                   np.array(d_y_points) * force_points[1])
+            log("dx:{},dy{}".format(dx, dy))
             qx = np.sum([q[0] for q in [q1, q2]])
             qy = np.sum([q[1] for q in [q1, q2]])
+            #log("qx:{},qy{}".format(qx,qy))
             histm = np.max(np.array(history), axis=0)
+            #log("histm:{}".format(histm))
             history.pop(0)
             history.append((qx, qy))
-            move_texts(texts, layer, dx, dy)
+            #log("history:{}".format(history))
+            #move_texts(texts, layer, dx, dy)
+            bboxes=move_texts2(bboxes, dx, dy)
             if (qx < precision_x and qy < precision_y) or np.all([qx, qy] >= histm):
+                move_texts(texts, layer, dx, dy)
                 break
     else:
         iface.messageBar().pushMessage("Warning", "No layer", level=QgsMessageBar.WARNING)
