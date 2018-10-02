@@ -1,5 +1,4 @@
 ##AdjustText=name
-##Lat=number 35.0
 
 from qgis.core import *
 from qgis.gui import *
@@ -52,16 +51,17 @@ def get_bboxes(objs):
     return [{'xmin':lrl.cornerPoints[0][0],'xmax':lrl.cornerPoints[2][0],'ymin':lrl.cornerPoints[0][1],'ymax':lrl.cornerPoints[2][1],'width':lrl.width,'height':lrl.height} for lrl in objs]
 
 def get_midpoint(bbox):
-    cx = (bbox.x0+bbox.x1)/2
-    cy = (bbox.y0+bbox.y1)/2
+    cx = (bbox["xmin"]+bbox["xmax"])/2
+    cy = (bbox["ymin"]+bbox["ymax"])/2
     return cx, cy
 
 def get_points_inside_bbox(x, y, bbox):
     """Return the indices of points inside the given bbox."""
     x1, y1, x2, y2 = bbox["xmin"], bbox["ymin"], bbox["xmax"], bbox["ymax"]
+    #log("x1:{},x:{},x2:{},{}".format(x1,x,x2,x>x1))
     x_in = np.logical_and(x>x1, x<x2)
     y_in = np.logical_and(y>y1, y<y2)
-    x_in
+    #log("xin:{},yin:{}".format(x_in,y_in))
     return np.asarray(np.nonzero(x_in & y_in)[0])
 
 def overlap_bbox_and_point(bbox, xp, yp):
@@ -73,26 +73,26 @@ def overlap_bbox_and_point(bbox, xp, yp):
     dir_y = np.sign(cy-yp)
 
     if dir_x == -1:
-        dx = xp - bbox.xmax
+        dx = xp - bbox['xmax']
     elif dir_x == 1:
-        dx = xp - bbox.xmin
+        dx = xp - bbox['xmin']
     else:
         dx = 0
 
     if dir_y == -1:
-        dy = yp - bbox.ymax
+        dy = yp - bbox['ymax']
     elif dir_y == 1:
-        dy = yp - bbox.ymin
+        dy = yp - bbox['ymin']
     else:
         dy = 0
     return dx, dy
 
-def repel_text(texts,move=False):
+def repel_text(texts,layer,move=False):
     bboxes = get_bboxes(texts)
-    xmins = [bbox['xmin'] for bbox in bboxes]
-    xmaxs = [bbox['xmax'] for bbox in bboxes]
-    ymaxs = [bbox['ymax'] for bbox in bboxes]
-    ymins = [bbox['ymin'] for bbox in bboxes]
+    xmins = np.array([bbox['xmin'] for bbox in bboxes])
+    xmaxs = np.array([bbox['xmax'] for bbox in bboxes])
+    ymaxs = np.array([bbox['ymax'] for bbox in bboxes])
+    ymins = np.array([bbox['ymin'] for bbox in bboxes])
 
     overlaps_x = np.zeros((len(bboxes), len(bboxes)))
     overlaps_y = np.zeros_like(overlaps_x)
@@ -120,19 +120,18 @@ def repel_text(texts,move=False):
 
     q = np.sum(overlaps_x), np.sum(overlaps_y)
     if move:
-        pass
-        #move_texts(texts, delta_x, delta_y, bboxes, ax=ax)
+        move_texts(texts, layer, delta_x, delta_y)
     return delta_x, delta_y, q
 
-def repel_text_from_points(x, y, texts, move=False):
+def repel_text_from_points(x, y, texts, layer, move=False):
 
     bboxes = get_bboxes(texts)
-
     # move_x[i,j] is the x displacement of the i'th text caused by the j'th point
     move_x = np.zeros((len(bboxes), len(x)))
     move_y = np.zeros((len(bboxes), len(x)))
     for i, bbox in enumerate(bboxes):
         xy_in = get_points_inside_bbox(x, y, bbox)
+        #log("{},{},{}".format(x,y,bbox))
         for j in xy_in:
             xp, yp = x[j], y[j]
             dx, dy = overlap_bbox_and_point(bbox, xp, yp)
@@ -143,8 +142,8 @@ def repel_text_from_points(x, y, texts, move=False):
     delta_x = move_x.sum(axis=1)
     delta_y = move_y.sum(axis=1)
     q = np.sum(np.abs(move_x)), np.sum(np.abs(move_y))
-    # if move:
-    #     move_texts(texts, delta_x, delta_y, bboxes, ax=ax)
+    if move:
+         move_texts(texts,layer, delta_x, delta_y)
     return delta_x, delta_y, q
 
 
@@ -191,8 +190,8 @@ def adjust_text(lim=500,force_text=(0.1, 0.25), force_points=(0.2, 0.5),precisio
         lr = canvas.labelingResults()
         texts = lr.labelsWithinRect(QgsRectangle(-1000000,-1000000,1000000,1000000))
         orig_xy = [get_point_position(text,layer) for text in texts]
-        orig_x = [xy[0] for xy in orig_xy]
-        orig_y = [xy[1] for xy in orig_xy]
+        orig_x = np.array([xy[0] for xy in orig_xy])
+        orig_y = np.array([xy[1] for xy in orig_xy])
         #log("len:{}".format(len(orig_xy)))
         for text,x,y in zip(texts,orig_x,orig_y):
             set_text_position(text,layer,x,y)
@@ -200,6 +199,8 @@ def adjust_text(lim=500,force_text=(0.1, 0.25), force_points=(0.2, 0.5),precisio
         force_text = float_to_tuple(force_text)
         force_points = float_to_tuple(force_points)
         bboxes = get_bboxes(texts)
+        for b in bboxes:
+            log("{},{},{},{}".format(b["xmin"],b["xmax"],b["ymin"],b["ymax"]))
         sum_width = np.sum(list(map(lambda bbox: bbox['width'], bboxes)))
         sum_height = np.sum(list(map(lambda bbox: bbox['height'], bboxes)))
         precision_x = precision * sum_width
@@ -211,10 +212,10 @@ def adjust_text(lim=500,force_text=(0.1, 0.25), force_points=(0.2, 0.5),precisio
 
         history = [(np.inf, np.inf)]*10
         for i in xrange(lim):
-        #   d_x_text, d_y_text, q1 = repel_text(texts)
-            d_x_text, d_y_text, q1 = [0] * len(texts), [0] * len(texts), (0, 0)
-            d_x_points, d_y_points, q2 = repel_text_from_points(x, y, texts)
-            log("{},{},{}".format(d_x_points, d_y_points, q2))
+            d_x_text, d_y_text, q1 = repel_text(texts,layer)
+        #    d_x_text, d_y_text, q1 = [0] * len(texts), [0] * len(texts), (0, 0)
+            d_x_points, d_y_points, q2 = repel_text_from_points(x, y, texts,layer)
+            #log("{},{},{}".format(d_x_points, d_y_points, q2))
 
             dx = (np.array(d_x_text) * force_text[0] +
                   np.array(d_x_points) * force_points[0])
