@@ -29,17 +29,19 @@ def float_to_tuple(a):
             raise TypeError('Force values must be castable to floats')
         return b
 
-def get_text_position(text,layer):
-    feature = getFeatureById(layer, text.featureId)
-    return (feature['x'],feature['y'])
+def move_texts(bboxes,layer):
+    for bbox in bboxes:
+        featureId = bbox['featureId']
+        x=bbox['xmin']
+        y=bbox['ymin']
+        set_text_position(featureId,layer,x,y)
 
-def get_point_position(text,layer):
-    feature = getFeatureById(layer, text.featureId)
-    p = feature.geometry().asPoint()
-    return (p[0],p[1])
+# def get_text_position(text,layer):
+#     feature = getFeatureById(layer, text.featureId)
+#     return (feature['x'],feature['y'])
 
-def set_text_position(text,layer,x,y):
-    feature = getFeatureById(layer, text.featureId)
+def set_text_position(featureId,layer,x,y):
+    feature = getFeatureById(layer, featureId)
     layer.startEditing()
     feature['x'] = round(x,4)
     feature['y'] = round(y,4)
@@ -47,9 +49,14 @@ def set_text_position(text,layer,x,y):
     layer.updateFeature(feature)
     layer.commitChanges()
     #feature = getFeatureById(layer, text.featureId)
-    #log("setx:{},sety:{}".format(feature['x'], feature['y']))
+    #log("setx:{},sety:{}".format(x, y))
 
-def set_text_position2(bbox,x,y):
+def get_point_position(text,layer):
+    feature = getFeatureById(layer, text.featureId)
+    p = feature.geometry().asPoint()
+    return (p[0],p[1])
+
+def set_bbox_position(bbox,x,y):
     bbox['xmin']=x
     bbox['ymin']=y
     bbox['xmax']=x+bbox['width']
@@ -57,12 +64,21 @@ def set_text_position2(bbox,x,y):
     bbox['extents'] = np.array([bbox['xmin'],bbox['ymin'],bbox['xmax'],bbox['ymax']])
     return bbox
 
+def set_bboxes(bboxes,delta_x, delta_y):
+    newbboxes=[]
+    for bbox,dx, dy in zip(bboxes,delta_x, delta_y):
+        x, y = bbox['xmin'],bbox['ymin']
+        log("textx:{},texty:{}".format(x,y))
+        newx = x + dx
+        newy = y + dy
+        newbbox=set_bbox_position(bbox, newx, newy)
+        newbboxes.append(newbbox)
+    return newbboxes
+
 def get_bboxes(objs):
-    bboxes = [{'xmin':lrl.cornerPoints[0][0],'xmax':lrl.cornerPoints[2][0],'ymin':lrl.cornerPoints[0][1],'ymax':lrl.cornerPoints[2][1],
+    bboxes = [{'featureId':lrl.featureId,'xmin':lrl.cornerPoints[0][0],'xmax':lrl.cornerPoints[2][0],'ymin':lrl.cornerPoints[0][1],'ymax':lrl.cornerPoints[2][1],
                'width':lrl.width,'height':lrl.height,
                'extents':np.array([lrl.cornerPoints[0][0],lrl.cornerPoints[0][1],lrl.cornerPoints[2][0],lrl.cornerPoints[2][1]])} for lrl in objs]
-    #for b in bboxes:
-    #    log("xmin:{},ymin:{},xmax:{},ymax:{}".format(b["xmin"], b["ymin"], b["xmax"], b["ymax"]))
     return bboxes
 
 def get_midpoint(bbox):
@@ -113,8 +129,8 @@ def intersection_size(bbox1, bbox2):
     y1 = np.minimum(bbox1['ymax'], bbox2['ymax'])
     return (x1-x0,y1-y0) if x0 <= x1 and y0 <= y1 else None
 
-def repel_text(texts,layer,move=False):
-    bboxes = get_bboxes(texts)
+def repel_text(bboxes):
+    #bboxes = get_bboxes(texts)
     xmins = [bbox['xmin'] for bbox in bboxes]
     xmaxs = [bbox['xmax'] for bbox in bboxes]
     ymaxs = [bbox['ymax'] for bbox in bboxes]
@@ -146,14 +162,9 @@ def repel_text(texts,layer,move=False):
     delta_y = move_y.sum(axis=1)
 
     q = np.sum(overlaps_x), np.sum(overlaps_y)
-    if move:
-        move_texts(texts, layer, delta_x, delta_y)
     return delta_x, delta_y, q
 
-def repel_text_from_points(x, y, texts, layer, move=False):
-
-    bboxes = get_bboxes(texts)
-    # move_x[i,j] is the x displacement of the i'th text caused by the j'th point
+def repel_text_from_points(x, y, bboxes):
     move_x = np.zeros((len(bboxes), len(x)))
     move_y = np.zeros((len(bboxes), len(x)))
     for i, bbox in enumerate(bboxes):
@@ -169,53 +180,43 @@ def repel_text_from_points(x, y, texts, layer, move=False):
     delta_x = move_x.sum(axis=1)
     delta_y = move_y.sum(axis=1)
     q = np.sum(np.abs(move_x)), np.sum(np.abs(move_y))
-    if move:
-         move_texts(texts,layer, delta_x, delta_y)
+
     return delta_x, delta_y, q
 
 
-def repel_text_from_axes(texts, extent,layer):
-    bboxes = get_bboxes(texts)
-    log("{}".format(len(bboxes)))
-    xmin, xmax = extent.xMinimum(),extent.xMaximum()
-    ymin, ymax = extent.yMinimum(),extent.yMaximum()
-    log("{},{},{},{}".format(xmin, xmax, ymin, ymax))
-    for i, bbox in enumerate(bboxes):
-        x1, y1, x2, y2 = bbox['xmin'], bbox['ymin'], bbox['xmax'], bbox['ymax']
-        log("{},{},{},{}".format(x1, y1, x2, y2))
-        dx, dy = 0, 0
-        if x1 < xmin:
-            dx = xmin - x1
-        if x2 > xmax:
-            dx = xmax - x2
-        if y1 < ymin:
-            dy = ymin - y1
-        if y2 > ymax:
-            dy = ymax - y2
-        if dx or dy:
-            x, y = get_text_position(texts[i], layer)
-            newx, newy = x + dx, y + dy
-            log("{},{}".format(newx,newy))
-            set_text_position(texts[i],layer,newx,newy)
+# def repel_text_from_axes(texts, extent,layer):
+#     bboxes = get_bboxes(texts)
+#     log("{}".format(len(bboxes)))
+#     xmin, xmax = extent.xMinimum(),extent.xMaximum()
+#     ymin, ymax = extent.yMinimum(),extent.yMaximum()
+#     log("{},{},{},{}".format(xmin, xmax, ymin, ymax))
+#     for i, bbox in enumerate(bboxes):
+#         x1, y1, x2, y2 = bbox['xmin'], bbox['ymin'], bbox['xmax'], bbox['ymax']
+#         log("{},{},{},{}".format(x1, y1, x2, y2))
+#         dx, dy = 0, 0
+#         if x1 < xmin:
+#             dx = xmin - x1
+#         if x2 > xmax:
+#             dx = xmax - x2
+#         if y1 < ymin:
+#             dy = ymin - y1
+#         if y2 > ymax:
+#             dy = ymax - y2
+#         if dx or dy:
+#             x, y = get_text_position(texts[i], layer)
+#             newx, newy = x + dx, y + dy
+#             log("{},{}".format(newx,newy))
+#             set_text_position(texts[i].featureId,layer,newx,newy)
 
-def move_texts(texts, layer,delta_x, delta_y):
-    for text,dx, dy in zip(texts,delta_x, delta_y):
-        x, y = get_text_position(text,layer)
-        log("textx:{},texty:{}".format(x,y))
-        newx = x + dx
-        newy = y + dy
-        set_text_position(text, layer, newx, newy)
 
-def move_texts2(bboxes,delta_x, delta_y):
-    newbboxes=[]
-    for bbox,dx, dy in zip(bboxes,delta_x, delta_y):
-        x, y = bbox['xmin'],bbox['ymin']
-        log("textx:{},texty:{}".format(x,y))
-        newx = x + dx
-        newy = y + dy
-        newbbox=set_text_position2(bbox, newx, newy)
-        newbboxes.append(newbbox)
-    return newbboxes
+def reset_text_position(features,layer):
+    for feature in features:
+        p = feature.geometry().asPoint()
+        layer.startEditing()
+        feature['x'] = round(p[0], 4)
+        feature['y'] = round(p[1], 4)
+        layer.updateFeature(feature)
+        layer.commitChanges()
 
 def adjust_text(lim=500,force_text=(0.1, 0.25), force_points=(0.2, 0.5),precision=0.01):
     canvas=iface.mapCanvas()
@@ -225,6 +226,14 @@ def adjust_text(lim=500,force_text=(0.1, 0.25), force_points=(0.2, 0.5),precisio
         features = layer.selectedFeatures()
         if len(features) == 0:
             features = layer.getFeatures()
+        reset_text_position(features,layer)
+        layer.setCustomProperty("labeling/isExpression", True)
+        #layer.setCustomProperty("labeling/alignment", 'case when "x" < $x  THEN "right" ELSE "left" END')
+        palyr = QgsPalLayerSettings()
+        palyr.readFromLayer(layer)
+        palyr.setDataDefinedProperty(QgsPalLayerSettings.Hali, True, True, "case when \"x\" < $x  THEN 'right' ELSE 'left' END", "halign")
+        palyr.writeToLayer(layer)
+        iface.mapCanvas().refresh()
 
         lr = canvas.labelingResults()
         texts = lr.labelsWithinRect(QgsRectangle(-1000000,-1000000,1000000,1000000))
@@ -232,8 +241,8 @@ def adjust_text(lim=500,force_text=(0.1, 0.25), force_points=(0.2, 0.5),precisio
         orig_x = np.array([xy[0] for xy in orig_xy])
         orig_y = np.array([xy[1] for xy in orig_xy])
         log("len:{}".format(len(orig_xy)))
-        for text,x,y in zip(texts,orig_x,orig_y):
-            set_text_position(text,layer,x,y)
+        #for text,x,y in zip(texts,orig_x,orig_y):
+        #    set_text_position(text.featureId,layer,x,y)
         x,y = orig_x,orig_y
         force_text = float_to_tuple(force_text)
         force_points = float_to_tuple(force_points)
@@ -250,10 +259,10 @@ def adjust_text(lim=500,force_text=(0.1, 0.25), force_points=(0.2, 0.5),precisio
         history = [(np.inf, np.inf)]*10
         for i in xrange(lim):
             log("i:{}".format(i))
-            d_x_text, d_y_text, q1 = repel_text(texts,layer)
+            d_x_text, d_y_text, q1 = repel_text(bboxes)
             #d_x_text, d_y_text, q1 = [0] * len(texts), [0] * len(texts), (0, 0)
-            #d_x_points, d_y_points, q2 = repel_text_from_points(x, y, texts,layer)
-            d_x_points, d_y_points, q2 = [0] * len(texts), [0] * len(texts), (0, 0)
+            d_x_points, d_y_points, q2 = repel_text_from_points(x, y, bboxes)
+            #d_x_points, d_y_points, q2 = [0] * len(texts), [0] * len(texts), (0, 0)
             #log("d_x:{},d_y{},q2{}".format(d_x_points, d_y_points, q2))
             log("d_x:{},d_y{},q2{}".format(d_x_text, d_y_text, q1))
 
@@ -271,35 +280,11 @@ def adjust_text(lim=500,force_text=(0.1, 0.25), force_points=(0.2, 0.5),precisio
             history.append((qx, qy))
             #log("history:{}".format(history))
             #move_texts(texts, layer, dx, dy)
-            bboxes=move_texts2(bboxes, dx, dy)
+            bboxes=set_bboxes(bboxes, dx, dy)
             if (qx < precision_x and qy < precision_y) or np.all([qx, qy] >= histm):
-                move_texts(texts, layer, dx, dy)
+                move_texts(bboxes, layer)
                 break
     else:
         iface.messageBar().pushMessage("Warning", "No layer", level=QgsMessageBar.WARNING)
 
 adjust_text()
-
-# log("{}".format(extent))
-# for lrl in lr.labelsWithinRect(extent):
-#     if lrl.layerID == layer.id():
-#         angle = 90 - QgsPoint(lrl.cornerPoints[0]).azimuth(QgsPoint(lrl.cornerPoints[1]))
-#         xmin = lrl.cornerPoints[0][0]
-#         xmax = lrl.cornerPoints[2][0]
-#         ymin = lrl.cornerPoints[0][1]
-#         ymax = lrl.cornerPoints[2][1]
-#         rlabel = angle
-#         featid = lrl.featureId
-#         feature=getFeatureById(layer,featid)
-#         p = feature.geometry().asPoint()
-#         log("{},{},{},{},{},{},{},{}".format(featid,p[0],p[1],xmin,xmax,ymin,ymax,angle))
-
-# def move_texts():
-#     layer.startEditing()
-#     for feature in features:
-#         p = feature.geometry().asPoint()
-#         x = feature['x']
-#         feature['x'] = x+100
-#         layer.updateFeature(feature)
-#         log("{}".format(x))
-#     layer.commitChanges()
