@@ -1,4 +1,5 @@
 ##AdjustText=name
+##Reset=boolean True
 
 from qgis.core import *
 from qgis.gui import *
@@ -75,10 +76,17 @@ def set_bboxes(bboxes,delta_x, delta_y):
         newbboxes.append(newbbox)
     return newbboxes
 
-def get_bboxes(objs):
-    bboxes = [{'featureId':lrl.featureId,'xmin':lrl.cornerPoints[0][0],'xmax':lrl.cornerPoints[2][0],'ymin':lrl.cornerPoints[0][1],'ymax':lrl.cornerPoints[2][1],
-               'width':lrl.width,'height':lrl.height,
-               'extents':np.array([lrl.cornerPoints[0][0],lrl.cornerPoints[0][1],lrl.cornerPoints[2][0],lrl.cornerPoints[2][1]])} for lrl in objs]
+def get_bboxes(objs,expand):
+
+    bboxes = [{'featureId':lrl.featureId,
+               'xmin':lrl.cornerPoints[0][0]-lrl.width*(expand[0]-1)/2.0,
+               'xmax':lrl.cornerPoints[0][0]+lrl.width*(expand[0]-1)/2.0,
+               'ymin':lrl.cornerPoints[0][1]-lrl.height*(expand[1]-1)/2.0,
+               'ymax':lrl.cornerPoints[0][1]+lrl.height*(expand[1]-1)/2.0,
+               'width':lrl.width*expand[0],'height':lrl.height*expand[1],
+               'extents':np.array([lrl.cornerPoints[0][0]-lrl.width*(expand[0]-1)/2.0,lrl.cornerPoints[0][0]+lrl.width*(expand[0]-1)/2.0,lrl.cornerPoints[0][1]-lrl.height*(expand[1]-1)/2.0,lrl.cornerPoints[0][1]+lrl.height*(expand[1]-1)/2.0])} for lrl in objs]
+    # for bbox in bboxes:
+    #     log("xmin:{},xmax:{},ymin:{},ymax:{}".format(bbox["xmin"],bbox["xmax"],bbox["ymin"],bbox["ymax"]))
     return bboxes
 
 def get_midpoint(bbox):
@@ -89,10 +97,10 @@ def get_midpoint(bbox):
 def get_points_inside_bbox(x, y, bbox):
     """Return the indices of points inside the given bbox."""
     x1, y1, x2, y2 = bbox["xmin"], bbox["ymin"], bbox["xmax"], bbox["ymax"]
-    #log("x1:{},x:{},x2:{},{}".format(x1,x,x2,x>x1))
+    log("x1:{},x:{},x2:{},{}".format(x1,x,x2,x>x1))
     x_in = np.logical_and(x>x1, x<x2)
     y_in = np.logical_and(y>y1, y<y2)
-    #log("xin:{},yin:{}".format(x_in,y_in))
+    log("xin:{},yin:{}".format(x_in,y_in))
     return np.asarray(np.nonzero(x_in & y_in)[0])
 
 def overlap_bbox_and_point(bbox, xp, yp):
@@ -169,7 +177,7 @@ def repel_text_from_points(x, y, bboxes):
     move_y = np.zeros((len(bboxes), len(x)))
     for i, bbox in enumerate(bboxes):
         xy_in = get_points_inside_bbox(x, y, bbox)
-        #log("x:{},y:{},bbox:{},xy_in:{}".format(x,y,bbox,xy_in))
+        #log("xmin:{},x:{},xmax:{},xy_in:{}".format(bbox["xmin"],x,bbox["xmax"],xy_in))
         for j in xy_in:
             xp, yp = x[j], y[j]
             dx, dy = overlap_bbox_and_point(bbox, xp, yp)
@@ -210,13 +218,14 @@ def repel_text_from_points(x, y, bboxes):
 
 
 def reset_text_position(features,layer):
+    layer.startEditing()
     for feature in features:
         p = feature.geometry().asPoint()
-        layer.startEditing()
+
         feature['x'] = round(p[0], 4)
         feature['y'] = round(p[1], 4)
         layer.updateFeature(feature)
-        layer.commitChanges()
+    layer.commitChanges()
 
 def adjust_text(lim=500,force_text=(0.1, 0.25), force_points=(0.2, 0.5),precision=0.01):
     canvas=iface.mapCanvas()
@@ -226,15 +235,7 @@ def adjust_text(lim=500,force_text=(0.1, 0.25), force_points=(0.2, 0.5),precisio
         features = layer.selectedFeatures()
         if len(features) == 0:
             features = layer.getFeatures()
-        reset_text_position(features,layer)
-        layer.setCustomProperty("labeling/isExpression", True)
-        #layer.setCustomProperty("labeling/alignment", 'case when "x" < $x  THEN "right" ELSE "left" END')
-        palyr = QgsPalLayerSettings()
-        palyr.readFromLayer(layer)
-        palyr.setDataDefinedProperty(QgsPalLayerSettings.Hali, True, True, "case when \"x\" < $x  THEN 'right' ELSE 'left' END", "halign")
-        palyr.writeToLayer(layer)
-        iface.mapCanvas().refresh()
-
+        #reset_text_position(features,layer)
         lr = canvas.labelingResults()
         extent = canvas.extent()
         #extent = QgsRectangle(-1000000,-1000000,1000000,1000000)
@@ -248,7 +249,7 @@ def adjust_text(lim=500,force_text=(0.1, 0.25), force_points=(0.2, 0.5),precisio
         x,y = orig_x,orig_y
         force_text = float_to_tuple(force_text)
         force_points = float_to_tuple(force_points)
-        bboxes = get_bboxes(texts)
+        bboxes = get_bboxes(texts,expand=(1.2, 1.2))
         sum_width = np.sum(list(map(lambda bbox: bbox['width'], bboxes)))
         sum_height = np.sum(list(map(lambda bbox: bbox['height'], bboxes)))
         precision_x = precision * sum_width
@@ -289,4 +290,23 @@ def adjust_text(lim=500,force_text=(0.1, 0.25), force_points=(0.2, 0.5),precisio
     else:
         iface.messageBar().pushMessage("Warning", "No layer", level=QgsMessageBar.WARNING)
 
-adjust_text()
+def reset_label():
+    canvas = iface.mapCanvas()
+    layer = iface.activeLayer()
+
+    if layer is not None:
+        features = layer.selectedFeatures()
+        if len(features) == 0:
+            features = layer.getFeatures()
+        reset_text_position(features, layer)
+        layer.setCustomProperty("labeling/isExpression", True)
+        palyr = QgsPalLayerSettings()
+        palyr.readFromLayer(layer)
+        palyr.setDataDefinedProperty(QgsPalLayerSettings.Hali, True, True, "case when \"x\" < $x  THEN 'right' ELSE 'left' END", "halign")
+        palyr.writeToLayer(layer)
+        canvas.refresh()
+
+if Reset:
+    reset_label()
+else:
+    adjust_text()
