@@ -68,7 +68,7 @@ def set_bboxes(bboxes,delta_x, delta_y):
     newbboxes=[]
     for bbox,dx, dy in zip(bboxes,delta_x, delta_y):
         x, y = bbox['xmin'],bbox['ymin']
-        log("textx:{},texty:{}".format(x,y))
+        #log("textx:{},texty:{}".format(x,y))
         newx = x + dx
         newy = y + dy
         newbbox=set_bbox_position(bbox, newx, newy)
@@ -135,7 +135,7 @@ def repel_text(bboxes):
     xmaxs = [bbox['xmax'] for bbox in bboxes]
     ymaxs = [bbox['ymax'] for bbox in bboxes]
     ymins = [bbox['ymin'] for bbox in bboxes]
-    log("xmins:{}".format(xmins))
+    #log("xmins:{}".format(xmins))
     overlaps_x = np.zeros((len(bboxes), len(bboxes)))
     overlaps_y = np.zeros_like(overlaps_x)
     overlap_directions_x = np.zeros_like(overlaps_x)
@@ -169,7 +169,7 @@ def repel_text_from_points(x, y, bboxes):
     move_y = np.zeros((len(bboxes), len(x)))
     for i, bbox in enumerate(bboxes):
         xy_in = get_points_inside_bbox(x, y, bbox)
-        log("x:{},y:{},bbox:{},xy_in:{}".format(x,y,bbox,xy_in))
+        #log("x:{},y:{},bbox:{},xy_in:{}".format(x,y,bbox,xy_in))
         for j in xy_in:
             xp, yp = x[j], y[j]
             dx, dy = overlap_bbox_and_point(bbox, xp, yp)
@@ -236,7 +236,9 @@ def adjust_text(lim=500,force_text=(0.1, 0.25), force_points=(0.2, 0.5),precisio
         iface.mapCanvas().refresh()
 
         lr = canvas.labelingResults()
-        texts = lr.labelsWithinRect(QgsRectangle(-1000000,-1000000,1000000,1000000))
+        extent = canvas.extent()
+        #extent = QgsRectangle(-1000000,-1000000,1000000,1000000)
+        texts = lr.labelsWithinRect(extent)
         orig_xy = [get_point_position(text,layer) for text in texts]
         orig_x = np.array([xy[0] for xy in orig_xy])
         orig_y = np.array([xy[1] for xy in orig_xy])
@@ -264,7 +266,7 @@ def adjust_text(lim=500,force_text=(0.1, 0.25), force_points=(0.2, 0.5),precisio
             d_x_points, d_y_points, q2 = repel_text_from_points(x, y, bboxes)
             #d_x_points, d_y_points, q2 = [0] * len(texts), [0] * len(texts), (0, 0)
             #log("d_x:{},d_y{},q2{}".format(d_x_points, d_y_points, q2))
-            log("d_x:{},d_y{},q2{}".format(d_x_text, d_y_text, q1))
+            #log("d_x:{},d_y{},q2{}".format(d_x_text, d_y_text, q1))
 
             dx = (np.array(d_x_text) * force_text[0] +
                   np.array(d_x_points) * force_points[0])
