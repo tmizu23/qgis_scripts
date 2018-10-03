@@ -32,24 +32,31 @@ def float_to_tuple(a):
             raise TypeError('Force values must be castable to floats')
         return b
 
-def move_texts(bboxes,layer):
+def move_texts(bboxes):
     for bbox in bboxes:
         featureId = bbox['featureId']
         x=bbox['orgx']
         y=bbox['orgy']
         ha=bbox['ha']
         va=bbox['va']
-        set_label_position(layer,featureId,x,y,ha,va)
+        set_label_position(featureId,x,y,ha,va)
 
 # def get_text_position(text,layer):
 #     feature = getFeatureById(layer, text.featureId)
 #     return (feature['x'],feature['y'])
 
-def set_label_position(layer,featureId,x,y,ha,va):
+def set_label_position(featureId,x,y,ha,va):
+    projectCRSSrsid = canvas.mapSettings().destinationCrs().srsid()
+    layerCRSSrsid = layer.crs().srsid()
+    if projectCRSSrsid != layerCRSSrsid:
+        crs_trans = QgsCoordinateTransform(projectCRSSrsid,layerCRSSrsid)
+        p = crs_trans.transform(QgsPoint(x, y))
+        x,y = p[0],p[1]
+
     feature = getFeatureById(layer, featureId)
     layer.startEditing()
-    feature['label_x'] = round(x,4)
-    feature['label_y'] = round(y,4)
+    feature['label_x'] = round(x,10)
+    feature['label_y'] = round(y,10)
     feature['label_ha'] = ha
     feature['label_va'] = va
     layer.updateFeature(feature)
@@ -57,7 +64,7 @@ def set_label_position(layer,featureId,x,y,ha,va):
     #feature = getFeatureById(layer, text.featureId)
     #log("setx:{},sety:{}".format(x, y))
 
-def get_point_position(text,layer):
+def get_point_position(text):
     feature = getFeatureById(layer, text.featureId)
     p = feature.geometry().asPoint()
     return (p[0],p[1])
@@ -270,7 +277,7 @@ def repel_text_from_points(x, y, bboxes):
 #             set_text_position(texts[i].featureId,layer,newx,newy)
 
 
-def reset_label_position(features,layer):
+def reset_label_position(features):
     layer.startEditing()
     pr = layer.dataProvider()
 
@@ -279,7 +286,7 @@ def reset_label_position(features,layer):
         if idx!=-1:
             pr.deleteAttributes([layer.fieldNameIndex(col)])
             layer.updateFields()
-    pr.addAttributes([QgsField('label_y', QVariant.Double, 'double', 20, 4),QgsField('label_x', QVariant.Double, 'double', 20, 4),QgsField('label_ha', QVariant.String),QgsField('label_va', QVariant.String)])
+    pr.addAttributes([QgsField('label_y', QVariant.Double, 'double', 20, 10),QgsField('label_x', QVariant.Double, 'double', 20, 10),QgsField('label_ha', QVariant.String),QgsField('label_va', QVariant.String)])
     # for col in ['label_x','label_y','label_ha','label_va']:
     #     idx=layer.fieldNameIndex(col)
     #     if idx==-1:
@@ -289,26 +296,25 @@ def reset_label_position(features,layer):
     #             pr.addAttributes([QgsField(col, QVariant.String)])
     layer.updateFields()
 
-
     for feature in features:
         try:
             p = feature.geometry().asPoint()
-            pr.changeAttributeValues({feature.id(): {pr.fieldNameMap()['label_x']: round(p[0], 4)}})
-            pr.changeAttributeValues({feature.id(): {pr.fieldNameMap()['label_y']: round(p[1], 4)}})
+            pr.changeAttributeValues({feature.id(): {pr.fieldNameMap()['label_x']: round(p[0], 10)}})
+            pr.changeAttributeValues({feature.id(): {pr.fieldNameMap()['label_y']: round(p[1], 10)}})
             pr.changeAttributeValues({feature.id(): {pr.fieldNameMap()['label_ha']: "left"}})
             pr.changeAttributeValues({feature.id(): {pr.fieldNameMap()['label_va']: "bottom"}})
             layer.updateFeature(feature)
-            feature["label_x"] = round(p[0], 4)
-            feature["label_y"] = round(p[1], 4)
+            feature["label_x"] = round(p[0], 10)
+            feature["label_y"] = round(p[1], 10)
             feature["label_ha"] = "left"
             feature["label_va"] = "bottom"
+            layer.updateFeature(feature)
         except:
             pass
-        layer.updateFeature(feature)
     layer.commitChanges()
 
 
-def adjust_text(canvas,layer,lim=500,force_text=(0.1, 0.25), force_points=(0.2, 0.5),precision=0.01):
+def adjust_text(lim=500,force_text=(0.1, 0.25), force_points=(0.2, 0.5),precision=0.01):
     if layer is not None:
         features = layer.selectedFeatures()
         if len(features) == 0:
@@ -317,7 +323,7 @@ def adjust_text(canvas,layer,lim=500,force_text=(0.1, 0.25), force_points=(0.2, 
         extent = canvas.extent()
         texts = lr.labelsWithinRect(extent)
         bboxes = get_bboxes(texts, expand=(1.5, 1.5))
-        orig_xy = [get_point_position(text,layer) for text in texts]
+        orig_xy = [get_point_position(text) for text in texts]
         orig_x = np.array([xy[0] for xy in orig_xy])
         orig_y = np.array([xy[1] for xy in orig_xy])
         log("len:{}".format(len(orig_xy)))
@@ -363,18 +369,20 @@ def adjust_text(canvas,layer,lim=500,force_text=(0.1, 0.25), force_points=(0.2, 
                 break
         #for bbox in bboxes:
         #    log("xmin:{},xmax:{},ymin:{},ymax:{}".format(bbox["xmin"], bbox["xmax"], bbox["ymin"], bbox["ymax"]))
-        move_texts(bboxes, layer)
+        move_texts(bboxes)
     else:
         iface.messageBar().pushMessage("Warning", "No layer", level=QgsMessageBar.WARNING)
 
-def reset_labelLayer(canvas,layer):
+def reset_labelLayer():
     if layer is not None:
         features = layer.selectedFeatures()
         if len(features) == 0:
             features = layer.getFeatures()
         #位置とalignを設定
-        reset_label_position(features, layer)
+        reset_label_position(features)
         #レイヤのラベルプロパティの設定。値で定義された式を設定
+        uri = QgsApplication.qgisSettingsDirPath()[:-1] +"processing/scripts/"+ "label.qml"
+        layer.loadNamedStyle(uri)
         layer.setCustomProperty("labeling/isExpression", True)
         palyr = QgsPalLayerSettings()
         palyr.readFromLayer(layer)
@@ -390,6 +398,6 @@ def reset_labelLayer(canvas,layer):
 canvas = iface.mapCanvas()
 layer = iface.activeLayer()
 if Reset:
-    reset_labelLayer(canvas,layer)
+    reset_labelLayer()
 else:
-    adjust_text(canvas,layer)
+    adjust_text()
