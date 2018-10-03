@@ -8,6 +8,7 @@ from PyQt4.QtCore import *
 from PyQt4.QtGui import *
 import numpy as np
 import itertools
+from operator import itemgetter
 
 def log(msg):
     QgsMessageLog.logMessage(msg, 'MyPlugin', QgsMessageLog.INFO)
@@ -31,23 +32,26 @@ def float_to_tuple(a):
             raise TypeError('Force values must be castable to floats')
         return b
 
-def move_texts(bboxes,layer,expand=(1.2,1.2)):
+def move_texts(bboxes,layer):
     for bbox in bboxes:
         featureId = bbox['featureId']
-        x=bbox['xmin']+bbox['width']*(expand[0]-1)/2.0
-        y=bbox['ymin']+bbox['height']*(expand[1]-1)/2.0
-        set_text_position(featureId,layer,x,y)
+        x=bbox['orgx']
+        y=bbox['orgy']
+        ha=bbox['ha']
+        va=bbox['va']
+        set_label_position(layer,featureId,x,y,ha,va)
 
 # def get_text_position(text,layer):
 #     feature = getFeatureById(layer, text.featureId)
 #     return (feature['x'],feature['y'])
 
-def set_text_position(featureId,layer,x,y):
+def set_label_position(layer,featureId,x,y,ha,va):
     feature = getFeatureById(layer, featureId)
     layer.startEditing()
-    feature['x'] = round(x,4)
-    feature['y'] = round(y,4)
-
+    feature['label_x'] = round(x,4)
+    feature['label_y'] = round(y,4)
+    feature['label_ha'] = ha
+    feature['label_va'] = va
     layer.updateFeature(feature)
     layer.commitChanges()
     #feature = getFeatureById(layer, text.featureId)
@@ -58,47 +62,60 @@ def get_point_position(text,layer):
     p = feature.geometry().asPoint()
     return (p[0],p[1])
 
-def set_bbox_position(bbox,x,y):
-    bbox['xmin']=x
-    bbox['ymin']=y
-    bbox['xmax']=x+bbox['width']
-    bbox['ymax'] = y + bbox['height']
-    bbox['extents'] = np.array([bbox['xmin'],bbox['ymin'],bbox['xmax'],bbox['ymax']])
-    return bbox
-
 def set_bboxes(bboxes,delta_x, delta_y):
-    newbboxes=[]
-    for bbox,dx, dy in zip(bboxes,delta_x, delta_y):
-        x, y = bbox['xmin'],bbox['ymin']
-        #log("textx:{},texty:{}".format(x,y))
-        newx = x + dx
-        newy = y + dy
-        newbbox=set_bbox_position(bbox, newx, newy)
-        newbboxes.append(newbbox)
-    return newbboxes
+    for i,(bbox,dx, dy) in enumerate(zip(bboxes,delta_x, delta_y)):
+        bbox['orgx'] = bbox['orgx']+dx
+        bbox['orgy'] = bbox['orgy']+dy
+        bbox['xmin'] = bbox['xmin']+dx
+        bbox['ymin'] = bbox['ymin']+dy
+        bbox['xmax'] = bbox['xmax']+dx
+        bbox['ymax'] = bbox['ymax']+dy
+        bboxes[i]=bbox
+    return bboxes
 
-def get_bbox(text,expand=(1.0,1.0)):
-    bbox = {'featureId': text.featureId,
-               'xmin': text.cornerPoints[0][0] - text.width * (expand[0] - 1) / 2.0,
-               'xmax': text.cornerPoints[0][0] + text.width * (expand[0] - 1) / 2.0,
-               'ymin': text.cornerPoints[0][1] - text.height * (expand[1] - 1) / 2.0,
-               'ymax': text.cornerPoints[0][1] + text.height * (expand[1] - 1) / 2.0,
-               'width': text.width * expand[0], 'height': text.height * expand[1],
-               'extents': np.array([text.cornerPoints[0][0] - text.width * (expand[0] - 1) / 2.0,
-                                    text.cornerPoints[0][0] + text.width * (expand[0] - 1) / 2.0,
-                                    text.cornerPoints[0][1] - text.height * (expand[1] - 1) / 2.0,
-                                    text.cornerPoints[0][1] + text.height * (expand[1] - 1) / 2.0])}
+def set_bbox_align(bbox, ha,va):
+    orgx = bbox['orgx']
+    orgy = bbox['orgy']
+    width = bbox['width']
+    height = bbox['height']
+
+    if ha=="left":
+        bbox['xmin'] = orgx
+        bbox['xmax'] = orgx + width
+    elif ha=="right":
+        bbox['xmin'] = orgx - width
+        bbox['xmax'] = orgx
+    elif ha == "center":
+        bbox['xmin'] = orgx - width/2.0
+        bbox['xmax'] = orgx + width/2.0
+
+    if va=="bottom":
+        bbox['ymin'] = orgy
+        bbox['ymax'] = orgy + height
+    elif va=="top":
+        bbox['ymin'] = orgy - height
+        bbox['ymax'] = orgy
+    elif va == "center":
+        bbox['ymin'] = orgy - height/2.0
+        bbox['ymax'] = orgy + height/2.0
+
+    bbox['ha'] = ha
+    bbox['va'] = va
+
     return bbox
 
-def get_bboxes(objs,expand):
-
-    bboxes = [{'featureId':lrl.featureId,
-               'xmin':lrl.cornerPoints[0][0]-lrl.width*(expand[0]-1)/2.0,
-               'xmax':lrl.cornerPoints[0][0]+lrl.width*(expand[0]-1)/2.0,
-               'ymin':lrl.cornerPoints[0][1]-lrl.height*(expand[1]-1)/2.0,
-               'ymax':lrl.cornerPoints[0][1]+lrl.height*(expand[1]-1)/2.0,
-               'width':lrl.width*expand[0],'height':lrl.height*expand[1],
-               'extents':np.array([lrl.cornerPoints[0][0]-lrl.width*(expand[0]-1)/2.0,lrl.cornerPoints[0][0]+lrl.width*(expand[0]-1)/2.0,lrl.cornerPoints[0][1]-lrl.height*(expand[1]-1)/2.0,lrl.cornerPoints[0][1]+lrl.height*(expand[1]-1)/2.0])} for lrl in objs]
+def get_bboxes(texts,expand):
+    #ha:left,va:bottomの時のラベル情報を取得
+    bboxes = [{'featureId': text.featureId,
+               'orgx': text.cornerPoints[0][0] - text.width * (expand[0] - 1) / 2.0,
+               'orgy': text.cornerPoints[0][1] - text.width * (expand[1] - 1) / 2.0,
+               'xmin': text.cornerPoints[0][0] - text.width * (expand[0] - 1) / 2.0,
+               'xmax': text.cornerPoints[2][0] + text.width * (expand[0] - 1) / 2.0,
+               'ymin': text.cornerPoints[0][1] - text.height * (expand[1] - 1) / 2.0,
+               'ymax': text.cornerPoints[2][1] + text.height * (expand[1] - 1) / 2.0,
+               'width': text.width * expand[0], 'height': text.height * expand[1],
+               'ha':"left",'va':"bottom"}
+              for text in texts]
     # for bbox in bboxes:
     #     log("xmin:{},xmax:{},ymin:{},ymax:{}".format(bbox["xmin"],bbox["xmax"],bbox["ymin"],bbox["ymax"]))
     return bboxes
@@ -151,64 +168,32 @@ def intersection_size(bbox1, bbox2):
     y1 = np.minimum(bbox1['ymax'], bbox2['ymax'])
     return (x1-x0,y1-y0) if x0 <= x1 and y0 <= y1 else None
 
-def set_text_align(featureId,align,layer):
-    feature = getFeatureById(layer, featureId)
-    layer.startEditing()
-    feature['align'] = align
-    layer.updateFeature(feature)
-    layer.commitChanges()
 
-def optimally_align_text(texts,layer):
+def optimally_align_text(x,y,bboxes):
     ha = ['left', 'right', 'center']
     va = ['bottom', 'top', 'center']
     alignment = [(h,v) for h, v in itertools.product(ha,va)]
-    for i, text in enumerate(texts):
+    for i, bbox in enumerate(bboxes):
         counts = []
         for h, v in alignment:
-            log("{},{}".format(h,v))
-            if h:
-                set_text_align(text.featureId,h,layer)
-            if v:
-                set_text_align(text.featureId,v,layer)
-    canvas = iface.mapCanvas()
-    extent = canvas.extent()
-    # extent = QgsRectangle(-1000000,-1000000,1000000,1000000)
-    lr = canvas.labelingResults()
-    texts = lr.labelsWithinRect(extent)
-    for i, text in enumerate(texts):
-        bbox = get_bbox(text,expand=(1,1))
-        log("xmin:{},xmax:{},ymin:{},ymax:{}".format(bbox["xmin"], bbox["xmax"], bbox["ymin"], bbox["ymax"]))
-    #         bbox = text.get_window_extent(r).expanded(*expand).\
-    #                                    transformed(ax.transData.inverted())
-    #         c = len(get_points_inside_bbox(x, y, bbox))
-    #         intersections = [bbox.intersection(bbox, bbox2) if i!=j else None
-    #                          for j, bbox2 in enumerate(bboxes+add_bboxes) ]
-    #         intersections = sum([abs(b.width*b.height) if b is not None else 0
-    #                              for b in intersections])
-    #         # Check for out-of-axes position
-    #         bbox = text.get_window_extent(r).transformed(ax.transData.inverted())
-    #         x1, y1, x2, y2 = bbox.xmin, bbox.ymin, bbox.xmax, bbox.ymax
-    #         if x1 < xmin or x2 > xmax or y1 < ymin or y2 > ymax:
-    #             axout = 1
-    #         else:
-    #             axout = 0
-    #         counts.append((axout, c, intersections))
-    #     # Most important: prefer alignments that keep the text inside the axes.
-    #     # If tied, take the alignments that minimize the number of x, y points
-    #     # contained inside the text.
-    #     # Break any remaining ties by minimizing the total area of intersections
-    #     # with all text bboxes and other objects to avoid.
-    #     a, value = min(enumerate(counts), key=itemgetter(1))
-    #     if 'x' in direction:
-    #         text.set_ha(alignment[a][0])
-    #     if 'y' in direction:
-    #         text.set_va(alignment[a][1])
-    #     bboxes[i] = text.get_window_extent(r).expanded(*expand).\
-    #                                    transformed(ax.transData.inverted())
-    # return texts
+            bbox = set_bbox_align(bbox,h,v)
+            #log("{},{}".format(h,v))
+            #log("xmin:{},xmax:{},ymin:{},ymax:{}".format(bbox["xmin"], bbox["xmax"], bbox["ymin"], bbox["ymax"]))
+            c = len(get_points_inside_bbox(x, y, bbox))
+            intersections = [intersection_size(bbox, bbox2) if i!=j else None for j, bbox2 in enumerate(bboxes) ]
+            intersections = sum([abs(b[0]*b[1]) if b is not None else 0 for b in intersections])
+            counts.append((c, intersections))
+        # Most important: prefer alignments that keep the text inside the axes.
+        # If tied, take the alignments that minimize the number of x, y points
+        # contained inside the text.
+        # Break any remaining ties by minimizing the total area of intersections
+        # with all text bboxes and other objects to avoid.
+        a, value = min(enumerate(counts), key=itemgetter(1))
+        bbox = set_bbox_align(bbox,alignment[a][0],alignment[a][1])
+        bboxes[i] = bbox
+    return bboxes
 
 def repel_text(bboxes):
-    #bboxes = get_bboxes(texts)
     xmins = [bbox['xmin'] for bbox in bboxes]
     xmaxs = [bbox['xmax'] for bbox in bboxes]
     ymaxs = [bbox['ymax'] for bbox in bboxes]
@@ -226,12 +211,10 @@ def repel_text(bboxes):
         for j in overlaps:
             bbox2 = bboxes[j]
             x, y = intersection_size(bbox1, bbox2)
-            #log("ovx:{},ovy{}".format(x,y))
             overlaps_x[i, j] = x
             overlaps_y[i, j] = y
-            direction = np.sign(bbox1['extents'] - bbox2['extents'])[:2]
-            overlap_directions_x[i, j] = direction[0]
-            overlap_directions_y[i, j] = direction[1]
+            overlap_directions_x[i, j] = np.sign(bbox1['xmin'] - bbox2['xmin'])
+            overlap_directions_y[i, j] = np.sign(bbox1['ymin'] - bbox2['ymin'])
 
     move_x = overlaps_x*overlap_directions_x
     move_y = overlaps_y*overlap_directions_y
@@ -287,49 +270,70 @@ def repel_text_from_points(x, y, bboxes):
 #             set_text_position(texts[i].featureId,layer,newx,newy)
 
 
-def reset_text_position(features,layer):
+def reset_label_position(features,layer):
     layer.startEditing()
-    for feature in features:
-        p = feature.geometry().asPoint()
+    pr = layer.dataProvider()
 
-        feature['x'] = round(p[0], 4)
-        feature['y'] = round(p[1], 4)
+    for col in ['label_x','label_y','label_ha','label_va']:
+        idx=layer.fieldNameIndex(col)
+        if idx!=-1:
+            pr.deleteAttributes([layer.fieldNameIndex(col)])
+            layer.updateFields()
+    pr.addAttributes([QgsField('label_y', QVariant.Double, 'double', 20, 4),QgsField('label_x', QVariant.Double, 'double', 20, 4),QgsField('label_ha', QVariant.String),QgsField('label_va', QVariant.String)])
+    # for col in ['label_x','label_y','label_ha','label_va']:
+    #     idx=layer.fieldNameIndex(col)
+    #     if idx==-1:
+    #         if col in ['label_x','label_y']:
+    #             pr.addAttributes([QgsField(col, QVariant.Double, 'double', 20, 4)])
+    #         elif col in ['label_ha','label_va']:
+    #             pr.addAttributes([QgsField(col, QVariant.String)])
+    layer.updateFields()
+
+
+    for feature in features:
+        try:
+            p = feature.geometry().asPoint()
+            pr.changeAttributeValues({feature.id(): {pr.fieldNameMap()['label_x']: round(p[0], 4)}})
+            pr.changeAttributeValues({feature.id(): {pr.fieldNameMap()['label_y']: round(p[1], 4)}})
+            pr.changeAttributeValues({feature.id(): {pr.fieldNameMap()['label_ha']: "left"}})
+            pr.changeAttributeValues({feature.id(): {pr.fieldNameMap()['label_va']: "bottom"}})
+            layer.updateFeature(feature)
+            feature["label_x"] = round(p[0], 4)
+            feature["label_y"] = round(p[1], 4)
+            feature["label_ha"] = "left"
+            feature["label_va"] = "bottom"
+        except:
+            pass
         layer.updateFeature(feature)
     layer.commitChanges()
 
-def adjust_text(lim=0,force_text=(0.1, 0.25), force_points=(0.2, 0.5),precision=0.01):
-    canvas=iface.mapCanvas()
-    layer = iface.activeLayer()
 
+def adjust_text(canvas,layer,lim=500,force_text=(0.1, 0.25), force_points=(0.2, 0.5),precision=0.01):
     if layer is not None:
         features = layer.selectedFeatures()
         if len(features) == 0:
             features = layer.getFeatures()
-        #reset_text_position(features,layer)
         lr = canvas.labelingResults()
         extent = canvas.extent()
-        #extent = QgsRectangle(-1000000,-1000000,1000000,1000000)
         texts = lr.labelsWithinRect(extent)
+        bboxes = get_bboxes(texts, expand=(1.5, 1.5))
         orig_xy = [get_point_position(text,layer) for text in texts]
         orig_x = np.array([xy[0] for xy in orig_xy])
         orig_y = np.array([xy[1] for xy in orig_xy])
         log("len:{}".format(len(orig_xy)))
-        #for text,x,y in zip(texts,orig_x,orig_y):
-        #    set_text_position(text.featureId,layer,x,y)
         x,y = orig_x,orig_y
         force_text = float_to_tuple(force_text)
         force_points = float_to_tuple(force_points)
-        bboxes = get_bboxes(texts,expand=(1.2, 1.2))
+
         sum_width = np.sum(list(map(lambda bbox: bbox['width'], bboxes)))
         sum_height = np.sum(list(map(lambda bbox: bbox['height'], bboxes)))
         precision_x = precision * sum_width
         precision_y = precision * sum_height
         #log("w:{},h:{},pw:{},ph:{}".format(sum_width,sum_height,precision_x,precision_y))
 
-        optimally_align_text(texts,layer)
+        bboxes = optimally_align_text(x,y,bboxes)
         #extent = canvas.extent()
         #repel_text_from_axes(texts,extent,layer)
-
         history = [(np.inf, np.inf)]*10
         for i in xrange(lim):
             log("i:{}".format(i))
@@ -363,23 +367,29 @@ def adjust_text(lim=0,force_text=(0.1, 0.25), force_points=(0.2, 0.5),precision=
     else:
         iface.messageBar().pushMessage("Warning", "No layer", level=QgsMessageBar.WARNING)
 
-def reset_label():
-    canvas = iface.mapCanvas()
-    layer = iface.activeLayer()
-
+def reset_labelLayer(canvas,layer):
     if layer is not None:
         features = layer.selectedFeatures()
         if len(features) == 0:
             features = layer.getFeatures()
-        reset_text_position(features, layer)
-        # layer.setCustomProperty("labeling/isExpression", True)
-        # palyr = QgsPalLayerSettings()
-        # palyr.readFromLayer(layer)
-        # palyr.setDataDefinedProperty(QgsPalLayerSettings.Hali, True, True, "case when \"x\" < $x  THEN 'right' ELSE 'left' END", "halign")
-        # palyr.writeToLayer(layer)
-        # canvas.refresh()
+        #位置とalignを設定
+        reset_label_position(features, layer)
+        #レイヤのラベルプロパティの設定。値で定義された式を設定
+        layer.setCustomProperty("labeling/isExpression", True)
+        palyr = QgsPalLayerSettings()
+        palyr.readFromLayer(layer)
+        #palyr.setDataDefinedProperty(QgsPalLayerSettings.Hali, True, True, "case when \"x\" < $x  THEN 'right' ELSE 'left' END", "halign")
+        palyr.setDataDefinedProperty(QgsPalLayerSettings.PositionX, True, False, "", "label_x")
+        palyr.setDataDefinedProperty(QgsPalLayerSettings.PositionY, True, False, "", "label_y")
+        palyr.setDataDefinedProperty(QgsPalLayerSettings.Hali, True, False,"", "label_ha")
+        palyr.setDataDefinedProperty(QgsPalLayerSettings.Vali, True, False, "", "label_va")
+        palyr.writeToLayer(layer)
+        canvas.refresh()
 
+
+canvas = iface.mapCanvas()
+layer = iface.activeLayer()
 if Reset:
-    reset_label()
+    reset_labelLayer(canvas,layer)
 else:
-    adjust_text()
+    adjust_text(canvas,layer)
