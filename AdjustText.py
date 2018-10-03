@@ -7,6 +7,7 @@ from qgis.utils import *
 from PyQt4.QtCore import *
 from PyQt4.QtGui import *
 import numpy as np
+import itertools
 
 def log(msg):
     QgsMessageLog.logMessage(msg, 'MyPlugin', QgsMessageLog.INFO)
@@ -30,11 +31,11 @@ def float_to_tuple(a):
             raise TypeError('Force values must be castable to floats')
         return b
 
-def move_texts(bboxes,layer):
+def move_texts(bboxes,layer,expand=(1.2,1.2)):
     for bbox in bboxes:
         featureId = bbox['featureId']
-        x=bbox['xmin']
-        y=bbox['ymin']
+        x=bbox['xmin']+bbox['width']*(expand[0]-1)/2.0
+        y=bbox['ymin']+bbox['height']*(expand[1]-1)/2.0
         set_text_position(featureId,layer,x,y)
 
 # def get_text_position(text,layer):
@@ -76,6 +77,19 @@ def set_bboxes(bboxes,delta_x, delta_y):
         newbboxes.append(newbbox)
     return newbboxes
 
+def get_bbox(text,expand=(1.0,1.0)):
+    bbox = {'featureId': text.featureId,
+               'xmin': text.cornerPoints[0][0] - text.width * (expand[0] - 1) / 2.0,
+               'xmax': text.cornerPoints[0][0] + text.width * (expand[0] - 1) / 2.0,
+               'ymin': text.cornerPoints[0][1] - text.height * (expand[1] - 1) / 2.0,
+               'ymax': text.cornerPoints[0][1] + text.height * (expand[1] - 1) / 2.0,
+               'width': text.width * expand[0], 'height': text.height * expand[1],
+               'extents': np.array([text.cornerPoints[0][0] - text.width * (expand[0] - 1) / 2.0,
+                                    text.cornerPoints[0][0] + text.width * (expand[0] - 1) / 2.0,
+                                    text.cornerPoints[0][1] - text.height * (expand[1] - 1) / 2.0,
+                                    text.cornerPoints[0][1] + text.height * (expand[1] - 1) / 2.0])}
+    return bbox
+
 def get_bboxes(objs,expand):
 
     bboxes = [{'featureId':lrl.featureId,
@@ -97,10 +111,10 @@ def get_midpoint(bbox):
 def get_points_inside_bbox(x, y, bbox):
     """Return the indices of points inside the given bbox."""
     x1, y1, x2, y2 = bbox["xmin"], bbox["ymin"], bbox["xmax"], bbox["ymax"]
-    log("x1:{},x:{},x2:{},{}".format(x1,x,x2,x>x1))
+    #log("x1:{},x:{},x2:{},{}".format(x1,x,x2,x>x1))
     x_in = np.logical_and(x>x1, x<x2)
     y_in = np.logical_and(y>y1, y<y2)
-    log("xin:{},yin:{}".format(x_in,y_in))
+    #log("xin:{},yin:{}".format(x_in,y_in))
     return np.asarray(np.nonzero(x_in & y_in)[0])
 
 def overlap_bbox_and_point(bbox, xp, yp):
@@ -136,6 +150,62 @@ def intersection_size(bbox1, bbox2):
     y0 = np.maximum(bbox1['ymin'], bbox2['ymin'])
     y1 = np.minimum(bbox1['ymax'], bbox2['ymax'])
     return (x1-x0,y1-y0) if x0 <= x1 and y0 <= y1 else None
+
+def set_text_align(featureId,align,layer):
+    feature = getFeatureById(layer, featureId)
+    layer.startEditing()
+    feature['align'] = align
+    layer.updateFeature(feature)
+    layer.commitChanges()
+
+def optimally_align_text(texts,layer):
+    ha = ['left', 'right', 'center']
+    va = ['bottom', 'top', 'center']
+    alignment = [(h,v) for h, v in itertools.product(ha,va)]
+    for i, text in enumerate(texts):
+        counts = []
+        for h, v in alignment:
+            log("{},{}".format(h,v))
+            if h:
+                set_text_align(text.featureId,h,layer)
+            if v:
+                set_text_align(text.featureId,v,layer)
+    canvas = iface.mapCanvas()
+    extent = canvas.extent()
+    # extent = QgsRectangle(-1000000,-1000000,1000000,1000000)
+    lr = canvas.labelingResults()
+    texts = lr.labelsWithinRect(extent)
+    for i, text in enumerate(texts):
+        bbox = get_bbox(text,expand=(1,1))
+        log("xmin:{},xmax:{},ymin:{},ymax:{}".format(bbox["xmin"], bbox["xmax"], bbox["ymin"], bbox["ymax"]))
+    #         bbox = text.get_window_extent(r).expanded(*expand).\
+    #                                    transformed(ax.transData.inverted())
+    #         c = len(get_points_inside_bbox(x, y, bbox))
+    #         intersections = [bbox.intersection(bbox, bbox2) if i!=j else None
+    #                          for j, bbox2 in enumerate(bboxes+add_bboxes) ]
+    #         intersections = sum([abs(b.width*b.height) if b is not None else 0
+    #                              for b in intersections])
+    #         # Check for out-of-axes position
+    #         bbox = text.get_window_extent(r).transformed(ax.transData.inverted())
+    #         x1, y1, x2, y2 = bbox.xmin, bbox.ymin, bbox.xmax, bbox.ymax
+    #         if x1 < xmin or x2 > xmax or y1 < ymin or y2 > ymax:
+    #             axout = 1
+    #         else:
+    #             axout = 0
+    #         counts.append((axout, c, intersections))
+    #     # Most important: prefer alignments that keep the text inside the axes.
+    #     # If tied, take the alignments that minimize the number of x, y points
+    #     # contained inside the text.
+    #     # Break any remaining ties by minimizing the total area of intersections
+    #     # with all text bboxes and other objects to avoid.
+    #     a, value = min(enumerate(counts), key=itemgetter(1))
+    #     if 'x' in direction:
+    #         text.set_ha(alignment[a][0])
+    #     if 'y' in direction:
+    #         text.set_va(alignment[a][1])
+    #     bboxes[i] = text.get_window_extent(r).expanded(*expand).\
+    #                                    transformed(ax.transData.inverted())
+    # return texts
 
 def repel_text(bboxes):
     #bboxes = get_bboxes(texts)
@@ -227,7 +297,7 @@ def reset_text_position(features,layer):
         layer.updateFeature(feature)
     layer.commitChanges()
 
-def adjust_text(lim=500,force_text=(0.1, 0.25), force_points=(0.2, 0.5),precision=0.01):
+def adjust_text(lim=0,force_text=(0.1, 0.25), force_points=(0.2, 0.5),precision=0.01):
     canvas=iface.mapCanvas()
     layer = iface.activeLayer()
 
@@ -256,6 +326,7 @@ def adjust_text(lim=500,force_text=(0.1, 0.25), force_points=(0.2, 0.5),precisio
         precision_y = precision * sum_height
         #log("w:{},h:{},pw:{},ph:{}".format(sum_width,sum_height,precision_x,precision_y))
 
+        optimally_align_text(texts,layer)
         #extent = canvas.extent()
         #repel_text_from_axes(texts,extent,layer)
 
@@ -285,8 +356,10 @@ def adjust_text(lim=500,force_text=(0.1, 0.25), force_points=(0.2, 0.5),precisio
             #move_texts(texts, layer, dx, dy)
             bboxes=set_bboxes(bboxes, dx, dy)
             if (qx < precision_x and qy < precision_y) or np.all([qx, qy] >= histm):
-                move_texts(bboxes, layer)
                 break
+        #for bbox in bboxes:
+        #    log("xmin:{},xmax:{},ymin:{},ymax:{}".format(bbox["xmin"], bbox["xmax"], bbox["ymin"], bbox["ymax"]))
+        move_texts(bboxes, layer)
     else:
         iface.messageBar().pushMessage("Warning", "No layer", level=QgsMessageBar.WARNING)
 
@@ -299,12 +372,12 @@ def reset_label():
         if len(features) == 0:
             features = layer.getFeatures()
         reset_text_position(features, layer)
-        layer.setCustomProperty("labeling/isExpression", True)
-        palyr = QgsPalLayerSettings()
-        palyr.readFromLayer(layer)
-        palyr.setDataDefinedProperty(QgsPalLayerSettings.Hali, True, True, "case when \"x\" < $x  THEN 'right' ELSE 'left' END", "halign")
-        palyr.writeToLayer(layer)
-        canvas.refresh()
+        # layer.setCustomProperty("labeling/isExpression", True)
+        # palyr = QgsPalLayerSettings()
+        # palyr.readFromLayer(layer)
+        # palyr.setDataDefinedProperty(QgsPalLayerSettings.Hali, True, True, "case when \"x\" < $x  THEN 'right' ELSE 'left' END", "halign")
+        # palyr.writeToLayer(layer)
+        # canvas.refresh()
 
 if Reset:
     reset_label()
