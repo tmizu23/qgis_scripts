@@ -1,34 +1,19 @@
 <!DOCTYPE qgis PUBLIC 'http://mrcc.com/qgis.dtd' 'SYSTEM'>
-<qgis version="2.18.20" simplifyAlgorithm="0" minimumScale="0" maximumScale="1e+08" simplifyDrawingHints="0" minLabelScale="0" maxLabelScale="1e+08" simplifyDrawingTol="1" readOnly="0" simplifyMaxScale="1" hasScaleBasedVisibilityFlag="0" simplifyLocal="1" scaleBasedLabelVisibilityFlag="0">
+<qgis version="2.18.23" simplifyAlgorithm="0" minimumScale="0" maximumScale="1e+08" simplifyDrawingHints="0" minLabelScale="0" maxLabelScale="1e+08" simplifyDrawingTol="1" readOnly="0" simplifyMaxScale="1" hasScaleBasedVisibilityFlag="0" simplifyLocal="1" scaleBasedLabelVisibilityFlag="0">
   <edittypes>
-    <edittype widgetv2type="TextEdit" name="Id">
+    <edittype widgetv2type="TextEdit" name="id">
       <widgetv2config IsMultiline="0" fieldEditable="1" constraint="" UseHtml="0" labelOnTop="0" constraintDescription="" notNull="0"/>
     </edittype>
-    <edittype widgetv2type="TextEdit" name="種名">
+    <edittype widgetv2type="TextEdit" name="name">
       <widgetv2config IsMultiline="0" fieldEditable="1" constraint="" UseHtml="0" labelOnTop="0" constraintDescription="" notNull="0"/>
     </edittype>
-    <edittype widgetv2type="TextEdit" name="確認日">
+    <edittype widgetv2type="TextEdit" name="x">
       <widgetv2config IsMultiline="0" fieldEditable="1" constraint="" UseHtml="0" labelOnTop="0" constraintDescription="" notNull="0"/>
     </edittype>
-    <edittype widgetv2type="TextEdit" name="株数">
+    <edittype widgetv2type="TextEdit" name="y">
       <widgetv2config IsMultiline="0" fieldEditable="1" constraint="" UseHtml="0" labelOnTop="0" constraintDescription="" notNull="0"/>
     </edittype>
-    <edittype widgetv2type="TextEdit" name="Ｘ">
-      <widgetv2config IsMultiline="0" fieldEditable="1" constraint="" UseHtml="0" labelOnTop="0" constraintDescription="" notNull="0"/>
-    </edittype>
-    <edittype widgetv2type="TextEdit" name="Ｙ">
-      <widgetv2config IsMultiline="0" fieldEditable="1" constraint="" UseHtml="0" labelOnTop="0" constraintDescription="" notNull="0"/>
-    </edittype>
-    <edittype widgetv2type="TextEdit" name="環境省">
-      <widgetv2config IsMultiline="0" fieldEditable="1" constraint="" UseHtml="0" labelOnTop="0" constraintDescription="" notNull="0"/>
-    </edittype>
-    <edittype widgetv2type="TextEdit" name="栃木県">
-      <widgetv2config IsMultiline="0" fieldEditable="1" constraint="" UseHtml="0" labelOnTop="0" constraintDescription="" notNull="0"/>
-    </edittype>
-    <edittype widgetv2type="TextEdit" name="備考">
-      <widgetv2config IsMultiline="0" fieldEditable="1" constraint="" UseHtml="0" labelOnTop="0" constraintDescription="" notNull="0"/>
-    </edittype>
-    <edittype widgetv2type="TextEdit" name="指定">
+    <edittype widgetv2type="TextEdit" name="align">
       <widgetv2config IsMultiline="0" fieldEditable="1" constraint="" UseHtml="0" labelOnTop="0" constraintDescription="" notNull="0"/>
     </edittype>
     <edittype widgetv2type="TextEdit" name="label_y">
@@ -127,7 +112,7 @@
     <property key="labeling/distMapUnitScale" value="0,0,0,0,0,0"/>
     <property key="labeling/drawLabels" value="true"/>
     <property key="labeling/enabled" value="true"/>
-    <property key="labeling/fieldName" value="種名"/>
+    <property key="labeling/fieldName" value="name"/>
     <property key="labeling/fitInPolygonOnly" value="false"/>
     <property key="labeling/fontCapitals" value="0"/>
     <property key="labeling/fontFamily" value="MS UI Gothic"/>
@@ -299,20 +284,15 @@
   <DiagramLayerSettings yPosColumn="-1" showColumn="-1" linePlacementFlags="10" placement="0" dist="0" xPosColumn="-1" priority="0" obstacle="0" zIndex="0" showAll="1"/>
   <annotationform>.</annotationform>
   <aliases>
-    <alias field="Id" index="0" name=""/>
-    <alias field="種名" index="1" name=""/>
-    <alias field="確認日" index="2" name=""/>
-    <alias field="株数" index="3" name=""/>
-    <alias field="Ｘ" index="4" name=""/>
-    <alias field="Ｙ" index="5" name=""/>
-    <alias field="環境省" index="6" name=""/>
-    <alias field="栃木県" index="7" name=""/>
-    <alias field="備考" index="8" name=""/>
-    <alias field="指定" index="9" name=""/>
-    <alias field="label_y" index="10" name=""/>
-    <alias field="label_x" index="11" name=""/>
-    <alias field="label_ha" index="12" name=""/>
-    <alias field="label_va" index="13" name=""/>
+    <alias field="id" index="0" name=""/>
+    <alias field="name" index="1" name=""/>
+    <alias field="x" index="2" name=""/>
+    <alias field="y" index="3" name=""/>
+    <alias field="align" index="4" name=""/>
+    <alias field="label_y" index="5" name=""/>
+    <alias field="label_x" index="6" name=""/>
+    <alias field="label_ha" index="7" name=""/>
+    <alias field="label_va" index="8" name=""/>
   </aliases>
   <excludeAttributesWMS/>
   <excludeAttributesWFS/>
@@ -324,16 +304,11 @@
       <column width="-1" hidden="0" type="field" name="label_x"/>
       <column width="-1" hidden="0" type="field" name="label_ha"/>
       <column width="-1" hidden="0" type="field" name="label_va"/>
-      <column width="-1" hidden="0" type="field" name="Id"/>
-      <column width="-1" hidden="0" type="field" name="種名"/>
-      <column width="-1" hidden="0" type="field" name="確認日"/>
-      <column width="-1" hidden="0" type="field" name="株数"/>
-      <column width="-1" hidden="0" type="field" name="Ｘ"/>
-      <column width="-1" hidden="0" type="field" name="Ｙ"/>
-      <column width="-1" hidden="0" type="field" name="環境省"/>
-      <column width="-1" hidden="0" type="field" name="栃木県"/>
-      <column width="-1" hidden="0" type="field" name="備考"/>
-      <column width="-1" hidden="0" type="field" name="指定"/>
+      <column width="-1" hidden="0" type="field" name="id"/>
+      <column width="-1" hidden="0" type="field" name="name"/>
+      <column width="-1" hidden="0" type="field" name="x"/>
+      <column width="-1" hidden="0" type="field" name="y"/>
+      <column width="-1" hidden="0" type="field" name="align"/>
     </columns>
   </attributetableconfig>
   <editform>.</editform>
@@ -360,16 +335,11 @@ def my_form_open(dialog, layer, feature):
     <fieldstyles/>
   </conditionalstyles>
   <defaults>
-    <default field="Id" expression=""/>
-    <default field="種名" expression=""/>
-    <default field="確認日" expression=""/>
-    <default field="株数" expression=""/>
-    <default field="Ｘ" expression=""/>
-    <default field="Ｙ" expression=""/>
-    <default field="環境省" expression=""/>
-    <default field="栃木県" expression=""/>
-    <default field="備考" expression=""/>
-    <default field="指定" expression=""/>
+    <default field="id" expression=""/>
+    <default field="name" expression=""/>
+    <default field="x" expression=""/>
+    <default field="y" expression=""/>
+    <default field="align" expression=""/>
     <default field="label_y" expression=""/>
     <default field="label_x" expression=""/>
     <default field="label_ha" expression=""/>

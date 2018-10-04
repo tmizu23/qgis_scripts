@@ -114,14 +114,14 @@ def set_bbox_align(bbox, ha,va):
 def get_bboxes(texts,expand):
     #ha:left,va:bottomの時のラベル情報を取得
     bboxes = [{'featureId': text.featureId,
-               'orgx': text.cornerPoints[0][0] - text.width * (expand[0] - 1) / 2.0,
-               'orgy': text.cornerPoints[0][1] - text.width * (expand[1] - 1) / 2.0,
+               'orgx': text.cornerPoints[0][0] + text.width / 2.0,
+               'orgy': text.cornerPoints[0][1] + text.height / 2.0,
                'xmin': text.cornerPoints[0][0] - text.width * (expand[0] - 1) / 2.0,
                'xmax': text.cornerPoints[2][0] + text.width * (expand[0] - 1) / 2.0,
                'ymin': text.cornerPoints[0][1] - text.height * (expand[1] - 1) / 2.0,
                'ymax': text.cornerPoints[2][1] + text.height * (expand[1] - 1) / 2.0,
                'width': text.width * expand[0], 'height': text.height * expand[1],
-               'ha':"left",'va':"bottom"}
+               'ha':"center",'va':"center"}
               for text in texts]
     # for bbox in bboxes:
     #     log("xmin:{},xmax:{},ymin:{},ymax:{}".format(bbox["xmin"],bbox["xmax"],bbox["ymin"],bbox["ymax"]))
@@ -301,13 +301,13 @@ def reset_label_position(features):
             p = feature.geometry().asPoint()
             pr.changeAttributeValues({feature.id(): {pr.fieldNameMap()['label_x']: round(p[0], 10)}})
             pr.changeAttributeValues({feature.id(): {pr.fieldNameMap()['label_y']: round(p[1], 10)}})
-            pr.changeAttributeValues({feature.id(): {pr.fieldNameMap()['label_ha']: "left"}})
-            pr.changeAttributeValues({feature.id(): {pr.fieldNameMap()['label_va']: "bottom"}})
+            pr.changeAttributeValues({feature.id(): {pr.fieldNameMap()['label_ha']: "center"}})
+            pr.changeAttributeValues({feature.id(): {pr.fieldNameMap()['label_va']: "center"}})
             layer.updateFeature(feature)
             feature["label_x"] = round(p[0], 10)
             feature["label_y"] = round(p[1], 10)
-            feature["label_ha"] = "left"
-            feature["label_va"] = "bottom"
+            feature["label_ha"] = "center"
+            feature["label_va"] = "center"
             layer.updateFeature(feature)
         except:
             pass
@@ -322,7 +322,7 @@ def adjust_text(lim=500,force_text=(0.1, 0.25), force_points=(0.2, 0.5),precisio
         lr = canvas.labelingResults()
         extent = canvas.extent()
         texts = lr.labelsWithinRect(extent)
-        bboxes = get_bboxes(texts, expand=(1.5, 1.5))
+        bboxes = get_bboxes(texts, expand=(1.05, 1.2))
         orig_xy = [get_point_position(text) for text in texts]
         orig_x = np.array([xy[0] for xy in orig_xy])
         orig_y = np.array([xy[1] for xy in orig_xy])
