@@ -65,6 +65,7 @@ def set_label_position(featureId,x,y,ha,va):
     #log("setx:{},sety:{}".format(x, y))
 
 def get_point_position(text):
+    #データポイントの位置を返す
     feature = getFeatureById(layer, text.featureId)
     p = feature.geometry().asPoint()
     return (p[0],p[1])
@@ -111,18 +112,18 @@ def set_bbox_align(bbox, ha,va):
 
     return bbox
 
-def get_bboxes(texts,expand):
+def get_bboxes(texts,expand,random):
     #ha:left,va:bottomの時のラベル情報を取得
     bboxes = [{'featureId': text.featureId,
-               'orgx': text.cornerPoints[0][0] + text.width / 2.0,
-               'orgy': text.cornerPoints[0][1] + text.height / 2.0,
-               'xmin': text.cornerPoints[0][0] - text.width * (expand[0] - 1) / 2.0,
-               'xmax': text.cornerPoints[2][0] + text.width * (expand[0] - 1) / 2.0,
-               'ymin': text.cornerPoints[0][1] - text.height * (expand[1] - 1) / 2.0,
-               'ymax': text.cornerPoints[2][1] + text.height * (expand[1] - 1) / 2.0,
+               'orgx': text.cornerPoints[0][0] + text.width / 2.0 + r,
+               'orgy': text.cornerPoints[0][1] + text.height / 2.0 + r,
+               'xmin': text.cornerPoints[0][0] - text.width * (expand[0] - 1) / 2.0 + r,
+               'xmax': text.cornerPoints[2][0] + text.width * (expand[0] - 1) / 2.0 + r,
+               'ymin': text.cornerPoints[0][1] - text.height * (expand[1] - 1) / 2.0 + r,
+               'ymax': text.cornerPoints[2][1] + text.height * (expand[1] - 1) / 2.0 + r,
                'width': text.width * expand[0], 'height': text.height * expand[1],
                'ha':"center",'va':"center"}
-              for text in texts]
+              for text,r in zip(texts,random)]
     # for bbox in bboxes:
     #     log("xmin:{},xmax:{},ymin:{},ymax:{}".format(bbox["xmin"],bbox["xmax"],bbox["ymin"],bbox["ymax"]))
     return bboxes
@@ -314,64 +315,155 @@ def reset_label_position(features):
     layer.commitChanges()
 
 
-def adjust_text(lim=500,force_text=(0.1, 0.25), force_points=(0.2, 0.5),precision=0.01):
-    if layer is not None:
-        features = layer.selectedFeatures()
-        if len(features) == 0:
-            features = layer.getFeatures()
-        lr = canvas.labelingResults()
-        extent = canvas.extent()
-        texts = lr.labelsWithinRect(extent)
-        bboxes = get_bboxes(texts, expand=(1.05, 1.2))
-        orig_xy = [get_point_position(text) for text in texts]
-        orig_x = np.array([xy[0] for xy in orig_xy])
-        orig_y = np.array([xy[1] for xy in orig_xy])
-        log("len:{}".format(len(orig_xy)))
-        x,y = orig_x,orig_y
-        force_text = float_to_tuple(force_text)
-        force_points = float_to_tuple(force_points)
+def adjust_text(force_push = 1e-6,force_pull = 1e-2, maxiter = 2000):
 
-        sum_width = np.sum(list(map(lambda bbox: bbox['width'], bboxes)))
-        sum_height = np.sum(list(map(lambda bbox: bbox['height'], bboxes)))
-        precision_x = precision * sum_width
-        precision_y = precision * sum_height
-        #log("w:{},h:{},pw:{},ph:{}".format(sum_width,sum_height,precision_x,precision_y))
-
-        bboxes = optimally_align_text(x,y,bboxes)
-        #extent = canvas.extent()
-        #repel_text_from_axes(texts,extent,layer)
-        history = [(np.inf, np.inf)]*10
-        for i in xrange(lim):
-            log("i:{}".format(i))
-            d_x_text, d_y_text, q1 = repel_text(bboxes)
-            #d_x_text, d_y_text, q1 = [0] * len(texts), [0] * len(texts), (0, 0)
-            d_x_points, d_y_points, q2 = repel_text_from_points(x, y, bboxes)
-            #d_x_points, d_y_points, q2 = [0] * len(texts), [0] * len(texts), (0, 0)
-            #log("d_x:{},d_y{},q2{}".format(d_x_points, d_y_points, q2))
-            #log("d_x:{},d_y{},q2{}".format(d_x_text, d_y_text, q1))
-
-            dx = (np.array(d_x_text) * force_text[0] +
-                  np.array(d_x_points) * force_points[0])
-            dy = (np.array(d_y_text) * force_text[1] +
-                  np.array(d_y_points) * force_points[1])
-            log("dx:{},dy{}".format(dx, dy))
-            qx = np.sum([q[0] for q in [q1, q2]])
-            qy = np.sum([q[1] for q in [q1, q2]])
-            #log("qx:{},qy{}".format(qx,qy))
-            histm = np.max(np.array(history), axis=0)
-            #log("histm:{}".format(histm))
-            history.pop(0)
-            history.append((qx, qy))
-            #log("history:{}".format(history))
-            #move_texts(texts, layer, dx, dy)
-            bboxes=set_bboxes(bboxes, dx, dy)
-            if (qx < precision_x and qy < precision_y) or np.all([qx, qy] >= histm):
-                break
-        #for bbox in bboxes:
-        #    log("xmin:{},xmax:{},ymin:{},ymax:{}".format(bbox["xmin"], bbox["xmax"], bbox["ymin"], bbox["ymax"]))
-        move_texts(bboxes)
-    else:
+    if layer is None:
         iface.messageBar().pushMessage("Warning", "No layer", level=QgsMessageBar.WARNING)
+        return
+
+    #text情報
+    features = layer.selectedFeatures()
+    if len(features) == 0:
+        features = layer.getFeatures()
+    lr = canvas.labelingResults()
+    extent = canvas.extent()
+    texts = lr.labelsWithinRect(extent)
+    n_texts = len(texts)
+    r = np.random.randn(0, force_push,n_texts)
+    bboxes = get_bboxes(texts, expand=(1.05, 1.2),random=r)
+    xbounds_x,xbounds_y = 0,1
+    ybounds_x,ybounds_y = 0,1
+
+    orig_xy = [get_point_position(text) for text in texts]
+    orig_x = np.array([xy[0] for xy in orig_xy])
+    orig_y = np.array([xy[1] for xy in orig_xy])
+    n_points = len(orig_xy)
+
+    log("len:{}".format(len(orig_xy)))
+    x,y = orig_x,orig_y
+
+    velocities=[]
+    velocity_decay = 0.7
+    iter = 0
+    any_overlaps = True
+    i_overlaps = True
+    while (any_overlaps and iter < maxiter) :
+        iter = iter + 1
+        any_overlaps = False
+        #The forces get weaker over time.
+        force_push = force_push * 0.99999
+        force_pull = force_pull * 0.9999
+        for i in range(n_texts):
+            i_overlaps = False
+            f["x"] = 0
+            f["y"] = 0
+            ci = centroid(TextBoxes[i], hjust[i], vjust[i])
+            for j in range(n_points):
+                if i == j:
+                    #Repel the box from its data point.
+                    if overlaps(DataBoxes[i], TextBoxes[i]):
+                        any_overlaps = True
+                        i_overlaps = True
+                        f = f + repel_force(ci, Points[i], force_push, direction)
+
+                else:
+                    cj = centroid(TextBoxes[j], hjust[j], vjust[j])
+                    #Repel the box from overlapping boxes.
+                    if j < n_texts and overlaps(TextBoxes[i], TextBoxes[j]):
+                        any_overlaps = True
+                        i_overlaps = True
+                        f = f + repel_force(ci, cj, force_push, direction)
+                    #Repel the box from other data points.
+                    if overlaps(DataBoxes[j], TextBoxes[i]):
+                        any_overlaps = True
+                        i_overlaps = True
+                        f = f + repel_force(ci, Points[j], force_push, direction)
+
+            #Pull the box toward its original position.
+            if not i_overlaps:
+                f = f + spring_force(original_centroids[i], ci, force_pull, direction)
+            velocities[i] = velocities[i] * velocity_decay + f
+            TextBoxes[i] = TextBoxes[i] + velocities[i]
+            #Put boxes within bounds
+            TextBoxes[i] = put_within_bounds(TextBoxes[i], xbounds, ybounds)
+            #look for line clashes
+            if not any_overlaps or iter % 5 == 0:
+                for j in range(n_points):
+                    cj = centroid(TextBoxes[j], hjust[j], vjust[j])
+                    ci = centroid(TextBoxes[i], hjust[i], vjust[i])
+                    #Switch label positions if lines overlap
+                    if i != j and j < n_texts and line_intersect(ci, Points[i], cj, Points[j]):
+                        any_overlaps = True
+                        TextBoxes[i] = TextBoxes[i] + spring_force(cj, ci, 1, direction)
+                        TextBoxes[j] = TextBoxes[j] + spring_force(ci, cj, 1, direction)
+                        # Check if resolved
+                        ci = centroid(TextBoxes[i], hjust[i], vjust[i])
+                        cj = centroid(TextBoxes[j], hjust[j], vjust[j])
+                        if line_intersect(ci, Points[i], cj, Points[j]):
+                            TextBoxes[i] = TextBoxes[i] + spring_force(cj, ci, 1.25, direction)
+                            TextBoxes[j] = TextBoxes[j] + spring_force(ci, cj, 1.25, direction)
+
+    for i in range(n_texts):
+        xs[i] = (TextBoxes[i].x1 + TextBoxes[i].x2) / 2
+        ys[i] = (TextBoxes[i].y1 + TextBoxes[i].y2) / 2
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+sum_width = np.sum(list(map(lambda bbox: bbox['width'], bboxes)))
+    sum_height = np.sum(list(map(lambda bbox: bbox['height'], bboxes)))
+    precision_x = precision * sum_width
+    precision_y = precision * sum_height
+    #log("w:{},h:{},pw:{},ph:{}".format(sum_width,sum_height,precision_x,precision_y))
+
+    bboxes = optimally_align_text(x,y,bboxes)
+    #extent = canvas.extent()
+    #repel_text_from_axes(texts,extent,layer)
+    history = [(np.inf, np.inf)]*10
+    for i in xrange(lim):
+        log("i:{}".format(i))
+        d_x_text, d_y_text, q1 = repel_text(bboxes)
+        #d_x_text, d_y_text, q1 = [0] * len(texts), [0] * len(texts), (0, 0)
+        d_x_points, d_y_points, q2 = repel_text_from_points(x, y, bboxes)
+        #d_x_points, d_y_points, q2 = [0] * len(texts), [0] * len(texts), (0, 0)
+        #log("d_x:{},d_y{},q2{}".format(d_x_points, d_y_points, q2))
+        #log("d_x:{},d_y{},q2{}".format(d_x_text, d_y_text, q1))
+
+        dx = (np.array(d_x_text) * force_text[0] +
+              np.array(d_x_points) * force_points[0])
+        dy = (np.array(d_y_text) * force_text[1] +
+              np.array(d_y_points) * force_points[1])
+        log("dx:{},dy{}".format(dx, dy))
+        qx = np.sum([q[0] for q in [q1, q2]])
+        qy = np.sum([q[1] for q in [q1, q2]])
+        #log("qx:{},qy{}".format(qx,qy))
+        histm = np.max(np.array(history), axis=0)
+        #log("histm:{}".format(histm))
+        history.pop(0)
+        history.append((qx, qy))
+        #log("history:{}".format(history))
+        #move_texts(texts, layer, dx, dy)
+        bboxes=set_bboxes(bboxes, dx, dy)
+        if (qx < precision_x and qy < precision_y) or np.all([qx, qy] >= histm):
+            break
+    #for bbox in bboxes:
+    #    log("xmin:{},xmax:{},ymin:{},ymax:{}".format(bbox["xmin"], bbox["xmax"], bbox["ymin"], bbox["ymax"]))
+    move_texts(bboxes)
+
 
 def reset_labelLayer():
     if layer is not None:
@@ -393,7 +485,6 @@ def reset_labelLayer():
         palyr.setDataDefinedProperty(QgsPalLayerSettings.Vali, True, False, "", "label_va")
         palyr.writeToLayer(layer)
         canvas.refresh()
-
 
 canvas = iface.mapCanvas()
 layer = iface.activeLayer()
