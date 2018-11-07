@@ -8,6 +8,7 @@ from PyQt4.QtCore import *
 from PyQt4.QtGui import *
 import numpy as np
 import itertools
+import math
 from operator import itemgetter
 
 def log(msg):
@@ -128,10 +129,20 @@ def get_bboxes(texts,expand,random):
     #     log("xmin:{},xmax:{},ymin:{},ymax:{}".format(bbox["xmin"],bbox["xmax"],bbox["ymin"],bbox["ymax"]))
     return bboxes
 
+def get_dboxes(orig_xy,padding):
+    #ポイントのpadding付きの範囲を取得
+    dboxes = [{'xmin': xy[0] - pad[0],
+               'xmax': xy[0] + pad[0],
+               'ymin': xy[1] - pad[1],
+               'ymax': xy[1] + pad[1],
+                }
+              for xy,pad in zip(orig_xy,padding)]
+    return dboxes
+
 def get_midpoint(bbox):
     cx = (bbox["xmin"]+bbox["xmax"])/2
     cy = (bbox["ymin"]+bbox["ymax"])/2
-    return cx, cy
+    return (cx, cy)
 
 def get_points_inside_bbox(x, y, bbox):
     """Return the indices of points inside the given bbox."""
@@ -315,6 +326,28 @@ def reset_label_position(features):
     layer.commitChanges()
 
 
+def spring_force(a, b, force = 0.000001):
+  v = (a - b)
+  f = force * v
+  return f
+
+def repel_force(a,b,force = 0.000001):
+    dx = math.fabs(a[0] - b[0])
+    dy = math.fabs(a[1] - b[1])
+    # Constrain the minimum distance, so it is never 0.
+    d2 = max(dx * dx + dy * dy, 0.0004)
+    # Compute a unit vector in the direction of the force.
+    v = (a - b) / math.sqrt(d2)
+    # Divide the force by the squared distance.
+    f = force * v / d2
+    if dx > dy:
+        f[1] = f[1] * 2
+    else:
+        f[0] = f[0] * 2
+    return f
+}
+
+
 def adjust_text(force_push = 1e-6,force_pull = 1e-2, maxiter = 2000):
 
     if layer is None:
@@ -331,17 +364,18 @@ def adjust_text(force_push = 1e-6,force_pull = 1e-2, maxiter = 2000):
     n_texts = len(texts)
     r = np.random.randn(0, force_push,n_texts)
     bboxes = get_bboxes(texts, expand=(1.05, 1.2),random=r)
-    xbounds_x,xbounds_y = 0,1
-    ybounds_x,ybounds_y = 0,1
+    xbounds = [0,1]
+    ybounds = [0,1]
 
     orig_xy = [get_point_position(text) for text in texts]
     orig_x = np.array([xy[0] for xy in orig_xy])
     orig_y = np.array([xy[1] for xy in orig_xy])
+    dboxes = get_dboxes(orig_xy, pading=(0,0))
     n_points = len(orig_xy)
 
     log("len:{}".format(len(orig_xy)))
     x,y = orig_x,orig_y
-
+    original_centroids = get_midpoint(bboxes)
     velocities=[]
     velocity_decay = 0.7
     iter = 0
@@ -355,57 +389,54 @@ def adjust_text(force_push = 1e-6,force_pull = 1e-2, maxiter = 2000):
         force_pull = force_pull * 0.9999
         for i in range(n_texts):
             i_overlaps = False
-            f["x"] = 0
-            f["y"] = 0
-            ci = centroid(TextBoxes[i], hjust[i], vjust[i])
+            f=[0,0]
+            ci = get_midpoint(bboxes[i])
             for j in range(n_points):
                 if i == j:
                     #Repel the box from its data point.
-                    if overlaps(DataBoxes[i], TextBoxes[i]):
+                    if intersection_size(dboxes[i], bboxes[i]) is not None:
                         any_overlaps = True
                         i_overlaps = True
-                        f = f + repel_force(ci, Points[i], force_push, direction)
+                        f = f + repel_force(ci, orig_xy[i], force_push)
 
                 else:
-                    cj = centroid(TextBoxes[j], hjust[j], vjust[j])
+                    cj = get_midpoint(bboxes[j])
                     #Repel the box from overlapping boxes.
-                    if j < n_texts and overlaps(TextBoxes[i], TextBoxes[j]):
+                    if j < n_texts and intersection_size(bboxes[i], bboxes[j]) is not None:
                         any_overlaps = True
                         i_overlaps = True
-                        f = f + repel_force(ci, cj, force_push, direction)
+                        f = f + repel_force(ci, cj, force_push)
                     #Repel the box from other data points.
-                    if overlaps(DataBoxes[j], TextBoxes[i]):
+                    if intersection_size(dboxes[j], bboxes[i]) is not None:
                         any_overlaps = True
                         i_overlaps = True
-                        f = f + repel_force(ci, Points[j], force_push, direction)
-
+                        f = f + repel_force(ci, orig_xy[j], force_push)
             #Pull the box toward its original position.
             if not i_overlaps:
-                f = f + spring_force(original_centroids[i], ci, force_pull, direction)
+                f = f + spring_force(original_centroids[i], ci, force_pull)
             velocities[i] = velocities[i] * velocity_decay + f
-            TextBoxes[i] = TextBoxes[i] + velocities[i]
+            bboxes[i] = bboxes[i] + velocities[i]
             #Put boxes within bounds
-            TextBoxes[i] = put_within_bounds(TextBoxes[i], xbounds, ybounds)
+            bboxes[i] = put_within_bounds(bboxes[i], xbounds, ybounds)
             #look for line clashes
             if not any_overlaps or iter % 5 == 0:
                 for j in range(n_points):
-                    cj = centroid(TextBoxes[j], hjust[j], vjust[j])
-                    ci = centroid(TextBoxes[i], hjust[i], vjust[i])
+                    cj = get_midpoint(bboxes[j])
+                    ci = get_midpoint(bboxes[i])
                     #Switch label positions if lines overlap
-                    if i != j and j < n_texts and line_intersect(ci, Points[i], cj, Points[j]):
+                    if i != j and j < n_texts and line_intersect(ci, orig_xy[i], cj, orig_xy[j]):
                         any_overlaps = True
-                        TextBoxes[i] = TextBoxes[i] + spring_force(cj, ci, 1, direction)
-                        TextBoxes[j] = TextBoxes[j] + spring_force(ci, cj, 1, direction)
+                        bboxes[i] = bboxes[i] + spring_force(cj, ci, 1)
+                        bboxes[j] = bboxes[j] + spring_force(ci, cj, 1)
                         # Check if resolved
-                        ci = centroid(TextBoxes[i], hjust[i], vjust[i])
-                        cj = centroid(TextBoxes[j], hjust[j], vjust[j])
-                        if line_intersect(ci, Points[i], cj, Points[j]):
-                            TextBoxes[i] = TextBoxes[i] + spring_force(cj, ci, 1.25, direction)
-                            TextBoxes[j] = TextBoxes[j] + spring_force(ci, cj, 1.25, direction)
+                        ci = get_midpoint(bboxes[i])
+                        cj = get_midpoint(bboxes[j])
+                        if line_intersect(ci, orig_xy[i], cj, orig_xy[j]):
+                            bboxes[i] = bboxes[i] + spring_force(cj, ci, 1.25)
+                            bboxes[j] = bboxes[j] + spring_force(ci, cj, 1.25)
 
-    for i in range(n_texts):
-        xs[i] = (TextBoxes[i].x1 + TextBoxes[i].x2) / 2
-        ys[i] = (TextBoxes[i].y1 + TextBoxes[i].y2) / 2
+    xy = get_midpoint(bboxes)
+
 
 
 
