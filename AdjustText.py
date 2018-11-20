@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 ##AdjustText=name
-##Reset=boolean True
+##Add_Label_XY_Column=boolean True
+##Reset_Label_Position=boolean True
+##Adjust_Text=boolean True
 
 from qgis.core import *
 from qgis.gui import *
@@ -29,12 +31,10 @@ def move_texts(bboxes):
         featureId = bbox['featureId']
         x = bbox['orgx']
         y = bbox['orgy']
-        ha = bbox['ha']
-        va = bbox['va']
-        set_label_position(featureId, x, y, ha, va)
+        set_label_position(featureId, x, y)
+        #log("{}".format(featureId))
 
-
-def set_label_position(featureId, x, y, ha, va):
+def set_label_position(featureId, x, y):
     projectCRSSrsid = canvas.mapSettings().destinationCrs().srsid()
     layerCRSSrsid = layer.crs().srsid()
     if projectCRSSrsid != layerCRSSrsid:
@@ -46,8 +46,6 @@ def set_label_position(featureId, x, y, ha, va):
     layer.startEditing()
     feature['label_x'] = round(x, 10)
     feature['label_y'] = round(y, 10)
-    feature['label_ha'] = ha
-    feature['label_va'] = va
     layer.updateFeature(feature)
     layer.commitChanges()
     # feature = getFeatureById(layer, text.featureId)
@@ -95,8 +93,6 @@ def transform_coord(bboxes,extent,normalized,random=None):
             bboxes[i]['xmax'] = (bboxes[i]['xmax'] - xmin) / (xmax - xmin) + random[i]
             bboxes[i]['ymin'] = (bboxes[i]['ymin'] - ymin) / (ymax - ymin) + random[i]
             bboxes[i]['ymax'] = (bboxes[i]['ymax'] - ymin) / (ymax - ymin) + random[i]
-            bboxes[i]['width'] = (bboxes[i]['width'] - xmin) / (xmax - xmin) + random[i]
-            bboxes[i]['height'] = (bboxes[i]['height'] - ymin) / (ymax - ymin) + random[i]
             #log("{}".format(bboxes[i]['orgx']))
     else:
         for i in range(len(bboxes)):
@@ -106,8 +102,6 @@ def transform_coord(bboxes,extent,normalized,random=None):
             bboxes[i]['xmax'] = bboxes[i]['xmax']*(xmax - xmin)+xmin
             bboxes[i]['ymin'] = bboxes[i]['ymin']*(ymax - ymin)+ymin
             bboxes[i]['ymax'] = bboxes[i]['ymax']*(ymax - ymin)+ymin
-            bboxes[i]['width'] = bboxes[i]['width']*(xmax - xmin)+xmin
-            bboxes[i]['height'] = bboxes[i]['height']*(ymax - ymin)+ymin
             #log("{}".format(bboxes[i]['orgx']))
     return bboxes
 
@@ -120,10 +114,7 @@ def get_bboxes(texts, expand):
                'xmin': text.cornerPoints[0][0] - text.width * (expand[0] - 1) / 2.0,
                'xmax': text.cornerPoints[2][0] + text.width * (expand[0] - 1) / 2.0,
                'ymin': text.cornerPoints[0][1] - text.height * (expand[1] - 1) / 2.0,
-               'ymax': text.cornerPoints[2][1] + text.height * (expand[1] - 1) / 2.0,
-               'width': text.width * expand[0],
-               'height': text.height * expand[1],
-               'ha': "center", 'va': "center"}
+               'ymax': text.cornerPoints[2][1] + text.height * (expand[1] - 1) / 2.0}
               for text in texts]
     # for bbox in bboxes:
     #     log("{},xmin:{},xmax:{},ymin:{},ymax:{}".format(bbox["label"],bbox["xmin"],bbox["xmax"],bbox["ymin"],bbox["ymax"]))
@@ -334,7 +325,7 @@ def adjust_text(force_push=1e-6, force_pull=1e-2, maxiter=2000):
                     ci = get_midpoint(bboxes[i])
                     # Switch label positions if lines overlap
                     if i != j and j < n_texts and line_intersect(ci, points[i], cj, points[j]):
-                        log("interA")
+                        #log("interA")
                         any_overlaps = True
                         bboxes[i] = set_bbox(bboxes[i],spring_force(cj, ci, 1))
                         bboxes[j] = set_bbox(bboxes[j],spring_force(ci, cj, 1))
@@ -342,7 +333,7 @@ def adjust_text(force_push=1e-6, force_pull=1e-2, maxiter=2000):
                         ci = get_midpoint(bboxes[i])
                         cj = get_midpoint(bboxes[j])
                         if line_intersect(ci, points[i], cj, points[j]):
-                            log("interB")
+                            #log("interB")
                             bboxes[i] = set_bbox(bboxes[i],spring_force(cj, ci, 1.25))
                             bboxes[j] = set_bbox(bboxes[j],spring_force(ci, cj, 1.25))
 
@@ -351,43 +342,50 @@ def adjust_text(force_push=1e-6, force_pull=1e-2, maxiter=2000):
     move_texts(bboxes)
 
 
-def reset_label_position(features):
-    layer.startEditing()
-    pr = layer.dataProvider()
+def set_position_column():
+    palyr = QgsPalLayerSettings()
+    palyr.readFromLayer(layer)
+    palyr.setDataDefinedProperty(QgsPalLayerSettings.Hali, True, True, "'center'", "halign")
+    palyr.setDataDefinedProperty(QgsPalLayerSettings.Vali, True, True, "'center'", "valign")
+    # 位置の設定
+    palyr.setDataDefinedProperty(QgsPalLayerSettings.PositionX, True, False, "", "label_x")
+    palyr.setDataDefinedProperty(QgsPalLayerSettings.PositionY, True, False, "", "label_y")
+    palyr.writeToLayer(layer)
+    canvas.refresh()
 
-    for col in ['label_x', 'label_y', 'label_ha', 'label_va']:
-        idx = layer.fieldNameIndex(col)
-        if idx != -1:
-            pr.deleteAttributes([layer.fieldNameIndex(col)])
-            layer.updateFields()
-    pr.addAttributes(
-        [QgsField('label_y', QVariant.Double, 'double', 20, 10), QgsField('label_x', QVariant.Double, 'double', 20, 10),
-         QgsField('label_ha', QVariant.String), QgsField('label_va', QVariant.String)])
-    # for col in ['label_x','label_y','label_ha','label_va']:
-    #     idx=layer.fieldNameIndex(col)
-    #     if idx==-1:
-    #         if col in ['label_x','label_y']:
-    #             pr.addAttributes([QgsField(col, QVariant.Double, 'double', 20, 4)])
-    #         elif col in ['label_ha','label_va']:
-    #             pr.addAttributes([QgsField(col, QVariant.String)])
-    layer.updateFields()
+def add_label_xy_column():
+    if layer is not None:
+        layer.startEditing()
+        pr = layer.dataProvider()
 
-    for feature in features:
-        try:
-            p = feature.geometry().asPoint()
-            pr.changeAttributeValues({feature.id(): {pr.fieldNameMap()['label_x']: round(p[0], 10)}})
-            pr.changeAttributeValues({feature.id(): {pr.fieldNameMap()['label_y']: round(p[1], 10)}})
-            pr.changeAttributeValues({feature.id(): {pr.fieldNameMap()['label_ha']: "center"}})
-            pr.changeAttributeValues({feature.id(): {pr.fieldNameMap()['label_va']: "center"}})
-            layer.updateFeature(feature)
-            feature["label_x"] = round(p[0], 10)
-            feature["label_y"] = round(p[1], 10)
-            feature["label_ha"] = "center"
-            feature["label_va"] = "center"
-            layer.updateFeature(feature)
-        except:
-            pass
-    layer.commitChanges()
+        for col in ['label_x', 'label_y']:
+            idx = layer.fieldNameIndex(col)
+            if idx != -1:
+                pr.deleteAttributes([layer.fieldNameIndex(col)])
+                layer.updateFields()
+        pr.addAttributes(
+            [QgsField('label_y', QVariant.Double, 'double', 20, 10), QgsField('label_x', QVariant.Double, 'double', 20, 10)])
+        layer.updateFields()
+        layer.commitChanges()
+
+
+
+def reset_label_position():
+
+    if layer is not None:
+        features = get_features_within_canvas()
+        if features is None:
+            return
+        layer.startEditing()
+        for feature in features:
+            try:
+                p = feature.geometry().asPoint()
+                feature["label_x"] = round(p[0], 10)
+                feature["label_y"] = round(p[1], 10)
+                layer.updateFeature(feature)
+            except:
+                pass
+        layer.commitChanges()
 
 
 def get_features_within_canvas():
@@ -398,31 +396,25 @@ def get_features_within_canvas():
     return features
 
 
-def reset_labelLayer():
+def set_label_style():
     if layer is not None:
-        features = get_features_within_canvas()
-        if len(list(features)) == 0:
-            return
-        # 位置とalignを設定
-        reset_label_position(features)
         # レイヤのラベルプロパティの設定。値で定義された式を設定
         uri = QgsApplication.qgisSettingsDirPath()[:-1] + "processing/scripts/" + "label.qml"
         layer.loadNamedStyle(uri)
         layer.setCustomProperty("labeling/isExpression", True)
-        palyr = QgsPalLayerSettings()
-        palyr.readFromLayer(layer)
-        # palyr.setDataDefinedProperty(QgsPalLayerSettings.Hali, True, True, "case when \"x\" < $x  THEN 'right' ELSE 'left' END", "halign")
-        palyr.setDataDefinedProperty(QgsPalLayerSettings.PositionX, True, False, "", "label_x")
-        palyr.setDataDefinedProperty(QgsPalLayerSettings.PositionY, True, False, "", "label_y")
-        palyr.setDataDefinedProperty(QgsPalLayerSettings.Hali, True, False, "", "label_ha")
-        palyr.setDataDefinedProperty(QgsPalLayerSettings.Vali, True, False, "", "label_va")
-        palyr.writeToLayer(layer)
-        canvas.refresh()
 
 
 canvas = iface.mapCanvas()
 layer = iface.activeLayer()
-if Reset:
-    reset_labelLayer()
-else:
+if Add_Label_XY_Column:
+    #レイヤにラベル用の座標列を追加
+    add_label_xy_column()
+    reset_label_position()
+    set_label_style()
+    set_position_column()
+if Reset_Label_Position:
+    #ラベルの場所をリセット
+    reset_label_position()
+if Adjust_Text:
+    #ラベルの場所を調整
     adjust_text()
